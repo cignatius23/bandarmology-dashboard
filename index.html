@@ -92,6 +92,10 @@ let state = {
   lastSync: localStorage.getItem("bdm_lastsync") || null,
   showUpload: false,
   showConnect: false,
+  // --- data SID (kepemilikan individual lokal, dari KSEI) ---
+  kseiRows: [],
+  kseiLoading: false,
+  kseiError: "",
 };
 
 function saveRows(rows){
@@ -141,6 +145,108 @@ async function testAndSaveConnection(url, token){
   saveRows(mergeIncoming(json.data || []));
   state.lastSync = new Date().toLocaleTimeString("id-ID");
   localStorage.setItem("bdm_lastsync", state.lastSync);
+}
+
+// ============================================================
+// DATA SID / KEPEMILIKAN KSEI (untuk kartu di bagian atas halaman)
+// ============================================================
+const BULAN_ID = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
+
+function numFmtSid(n){
+  const a = Math.round(Math.abs(n));
+  return (n<0?"\u2212":"") + a.toLocaleString('id-ID');
+}
+
+async function loadKseiData(){
+  if(!state.connection) return;
+  state.kseiLoading = true; state.kseiError = ""; render();
+  try{
+    const c = state.connection;
+    const sep = c.url.includes("?") ? "&" : "?";
+    const res = await fetch(`${c.url}${sep}token=${encodeURIComponent(c.token)}&sheet=ksei_ownership`);
+    const json = await res.json();
+    if(json.error){ state.kseiError = json.error; }
+    else {
+      state.kseiRows = (json.data||[]).map(r => ({
+        date: r.date,
+        ticker: r.ticker,
+        local_individual: Number(r.local_individual),
+      })).filter(r => r.date && r.ticker);
+    }
+  } catch(e){
+    state.kseiError = "Gagal mengambil data SID.";
+  }
+  state.kseiLoading = false;
+  render();
+}
+
+function buildMonthList(history) {
+  const sorted = [...history].sort((a,b) => new Date(a.date) - new Date(b.date));
+  if (sorted.length === 0) return [];
+
+  const lastDate = new Date(sorted[sorted.length - 1].date);
+  const year = lastDate.getFullYear();
+  const lastMonthIdx = lastDate.getMonth();
+
+  const byMonth = {};
+  sorted.forEach(r => {
+    const d = new Date(r.date);
+    if (d.getFullYear() === year) byMonth[d.getMonth()] = r.local_individual;
+  });
+
+  const list = [];
+  let prevVal = null;
+  for (let m = 0; m <= lastMonthIdx; m++) {
+    const val = byMonth[m] !== undefined ? byMonth[m] : null;
+    let delta = null, arrow = null, color = "var(--faint)";
+    if (val !== null && prevVal !== null) {
+      delta = val - prevVal;
+      if (delta > 0) { arrow = "\u25B2"; color = "var(--pos)"; }
+      else if (delta < 0) { arrow = "\u25BC"; color = "var(--neg)"; }
+      else { arrow = "\u2013"; color = "var(--muted)"; }
+    }
+    list.push({ label: `${BULAN_ID[m]} ${year}`, val, delta, arrow, color });
+    if (val !== null) prevVal = val;
+  }
+  return list;
+}
+
+function renderMonthList(items) {
+  return items.map(item => `
+    <div style="padding:14px 0;border-bottom:1px solid var(--border)">
+      <div class="mono" style="font-size:12px;color:var(--faint);letter-spacing:0.5px;margin-bottom:6px">${esc(item.label)}</div>
+      ${item.val === null ? `
+        <div class="mono" style="font-size:15px;color:var(--faint)">Belum ada data</div>
+      ` : `
+        <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+          <span class="display" style="font-size:24px;font-weight:700;color:var(--text)">${numFmtSid(item.val)}</span>
+          ${item.arrow ? `<span style="font-size:16px;color:${item.color}">${item.arrow}</span>` : ''}
+          ${item.delta !== null ? `<span class="mono" style="font-size:13px;color:${item.color}">${item.delta>0?'+':''}${numFmtSid(item.delta)}</span>` : ''}
+        </div>
+      `}
+    </div>
+  `).join("");
+}
+
+// Kartu SID -- ikut berubah sesuai ticker yang lagi aktif di dashboard
+function renderSidCard(activeTicker){
+  if(!state.connection){
+    return `
+    <div class="card" style="padding:20px;margin-bottom:20px">
+      <div class="mono" style="font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">SID / Kepemilikan Individual (Lokal)</div>
+      <div style="font-size:13px;color:var(--muted)">Sambungkan otomatis dulu untuk melihat data SID.</div>
+    </div>`;
+  }
+  const history = state.kseiRows.filter(r => r.ticker === activeTicker);
+  const monthList = buildMonthList(history);
+  return `
+  <div class="card" style="padding:20px;margin-bottom:20px">
+    <div class="display" style="font-size:18px;font-weight:700;margin-bottom:2px">${esc(activeTicker || "-")}</div>
+    <div class="mono" style="font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:1px;margin-bottom:14px">SID / Kepemilikan Individual (Lokal)</div>
+    ${state.kseiLoading ? `<div style="color:var(--faint);font-size:13px;padding:16px 0">Memuat data SID...</div>` :
+      state.kseiError ? `<div style="color:var(--neg);font-size:13px;padding:16px 0">${esc(state.kseiError)}</div>` :
+      monthList.length ? renderMonthList(monthList) : `<div style="color:var(--faint);font-size:13px;padding:16px 0">Belum ada data SID untuk ${esc(activeTicker || "saham ini")}.</div>`}
+  </div>`;
 }
 
 // ============================================================
@@ -302,6 +408,7 @@ async function doTestAndSaveConnection(){
   try{
     await testAndSaveConnection(url, token);
     closeConnectModal();
+    loadKseiData();
   } catch(e){
     errEl.textContent = e.message || "Gagal menghubungi URL itu. Cek lagi URL-nya benar dan sudah di-deploy.";
     errEl.style.display = "block";
@@ -416,6 +523,9 @@ function render(){
 
   root.innerHTML = `
   <div class="wrap">
+
+    ${renderSidCard(active)}
+
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:22px">
       <div>
         <div class="mono" style="font-size:10.5px;letter-spacing:1.5px;color:var(--faint);text-transform:uppercase;margin-bottom:5px">Posisi barang broker</div>
@@ -425,7 +535,6 @@ function render(){
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         ${syncStatusHtml}
         <a href="backtest.html" class="btn" style="text-decoration:none">Backtest</a>
-        <a href="ownership.html" class="btn" style="text-decoration:none">Kepemilikan</a>
         <button class="btn" onclick="openConnectModal()">${state.connection ? "Ubah koneksi" : "Sambungkan otomatis"}</button>
         <button class="btn" onclick="if(confirm('Hapus semua data tersimpan?')){ saveRows([]); render(); }">Hapus semua</button>
         <button class="btn btn-gold" onclick="openUploadModal()">Tempel manual</button>
@@ -469,7 +578,7 @@ function render(){
 
 // jalankan pertama kali, lalu auto-sync kalau sudah pernah connect
 render();
-if(state.connection) syncNow();
+if(state.connection){ syncNow(); loadKseiData(); }
 </script>
 </body>
 </html>
