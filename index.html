@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Panel Bacaan Bandar</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+<style>
+  :root {
+    --bg: #0B1220; --panel: #141C2E; --border: #232C42; --borderHi: #2E3954;
+    --text: #EDEAE2; --muted: #8B93A7; --faint: #59627A;
+    --gold: #C9A227; --pos: #3FB68B; --neg: #E1615A;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+  }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+  .display { font-family: 'Space Grotesk', sans-serif; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 26px 22px 60px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+    font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; border-radius: 3px;
+    padding: 9px 16px; border: 1px solid var(--border); background: none; color: var(--muted);
+  }
+  .btn-gold { background: var(--gold); color: var(--bg); font-weight: 600; border: none; }
+  .btn:hover { border-color: var(--borderHi); }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; }
+  input, select, textarea {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 3px;
+    color: var(--text); font-family: 'IBM Plex Mono', monospace; font-size: 12.5px;
+    padding: 9px 10px; outline: none; width: 100%;
+  }
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(5,8,15,0.78); z-index: 50;
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+  }
+  .modal-box { background: var(--panel); border: 1px solid var(--borderHi); border-radius: 4px; width: 100%; max-width: 560px; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; }
+  .modal-head { padding: 17px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: flex-start; }
+  .modal-body { padding: 20px; overflow-y: auto; }
+  .modal-foot { padding: 13px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
+  .badge {
+    font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.8px;
+    border-radius: 2px; padding: 2px 6px; border: 1px solid var(--border); color: var(--muted);
+  }
+  .spin { animation: spin 0.8s linear infinite; display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: 12px; }
+  .tab { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { padding: 8px 12px; }
+  ::placeholder { color: var(--faint); }
+  a { color: var(--gold); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+// ============================================================
+// KONSTAN & UTIL
+// ============================================================
+const BIG = new Set(["AK","BK","CC","NI","II","RF","SQ"]);
+const RETAIL = new Set(["XL","PD","AZ","XC","YP","KK","EP"]);
+function tipeBroker(code){ if(BIG.has(code)) return "BANDAR"; if(RETAIL.has(code)) return "RITEL"; return "LAIN"; }
+function lotFmt(n){
+  const a = Math.round(Math.abs(n));
+  const s = a.toLocaleString('id-ID');
+  return (n>0?"+":n<0?"\u2212":"") + s;
+}
+function esc(s){ const d=document.createElement("div"); d.textContent = s==null?"":String(s); return d.innerHTML; }
+
+const SAMPLE = `date,ticker,broker_code,broker_name,side,lot,value,avg
+2026-08-19,MBSS,AK,UBS Sekuritas,BUY,2000,568000000,2840
+2026-08-19,MBSS,XL,Stockbit Sekuritas,SELL,900,255600000,2840
+2026-08-20,MBSS,AK,UBS Sekuritas,SELL,1000,283000000,2830
+2026-08-20,MBSS,XL,Stockbit Sekuritas,SELL,700,198100000,2830`;
+
+// ============================================================
+// STATE (persist ke localStorage -- ini website beneran, jadi
+// localStorage aman dipakai, beda dengan artifact Claude)
+// ============================================================
+let state = {
+  rows: JSON.parse(localStorage.getItem("bdm_rows") || "[]"),
+  connection: JSON.parse(localStorage.getItem("bdm_connection") || "null"),
+  ticker: "",
+  varian: "ledger",
+  syncing: false,
+  syncError: "",
+  lastSync: localStorage.getItem("bdm_lastsync") || null,
+  showUpload: false,
+  showConnect: false,
+};
+
+function saveRows(rows){
+  state.rows = rows;
+  localStorage.setItem("bdm_rows", JSON.stringify(rows));
+}
+function saveConnection(conn){
+  state.connection = conn;
+  localStorage.setItem("bdm_connection", JSON.stringify(conn));
+}
+function mergeIncoming(incoming){
+  const key = r => `${r.date}__${r.ticker}__${r.broker_code}__${r.side}`;
+  const map = new Map(state.rows.map(r => [key(r), r]));
+  incoming.forEach(r => map.set(key(r), r));
+  return Array.from(map.values());
+}
+
+// ============================================================
+// SYNC OTOMATIS via Apps Script bridge
+// ============================================================
+async function syncNow(){
+  if(!state.connection) return;
+  state.syncing = true; state.syncError = ""; render();
+  try{
+    const sep = state.connection.url.includes("?") ? "&" : "?";
+    const res = await fetch(`${state.connection.url}${sep}token=${encodeURIComponent(state.connection.token)}&sheet=broker_positions`);
+    const json = await res.json();
+    if(json.error){ state.syncError = json.error; }
+    else {
+      saveRows(mergeIncoming(json.data || []));
+      state.lastSync = new Date().toLocaleTimeString("id-ID");
+      localStorage.setItem("bdm_lastsync", state.lastSync);
+    }
+  } catch(e){
+    state.syncError = "Gagal sinkron. Cek URL/token, atau situs Apps Script sedang bermasalah.";
+  }
+  state.syncing = false;
+  render();
+}
+
+async function testAndSaveConnection(url, token){
+  const sep = url.includes("?") ? "&" : "?";
+  const res = await fetch(`${url}${sep}token=${encodeURIComponent(token)}&sheet=broker_positions`);
+  const json = await res.json();
+  if(json.error) throw new Error(json.error);
+  saveConnection({url, token});
+  saveRows(mergeIncoming(json.data || []));
+  state.lastSync = new Date().toLocaleTimeString("id-ID");
+  localStorage.setItem("bdm_lastsync", state.lastSync);
+}
+
+// ============================================================
+// KOMPUTASI POSISI
+// ============================================================
+function computePositions(scoped){
+  const acc = {};
+  scoped.forEach(r => {
+    const code = r.broker_code;
+    if(!acc[code]) acc[code] = { code, name: r.broker_name || code, buy:0, sell:0, perDay:{}, avgSum:0, avgN:0 };
+    const lots = Number(r.lot) || 0;
+    const isBuy = String(r.side).toUpperCase() === "BUY";
+    if(isBuy) acc[code].buy += lots; else acc[code].sell += lots;
+    acc[code].perDay[r.date] = (acc[code].perDay[r.date] || 0) + (isBuy ? lots : -lots);
+    const a = Number(r.avg);
+    if(!isNaN(a) && a > 0){ acc[code].avgSum += a; acc[code].avgN += 1; }
+  });
+  return Object.values(acc)
+    .map(p => ({...p, net: p.buy - p.sell, avg: p.avgN ? p.avgSum/p.avgN : null}))
+    .sort((a,b) => b.net - a.net);
+}
+
+function sparklineSVG(values, color, w=100, h=32){
+  if(values.length < 2) return "";
+  const min = Math.min(...values), max = Math.max(...values);
+  const range = (max - min) || 1;
+  const pts = values.map((v,i) => {
+    const x = (i/(values.length-1)) * (w-4) + 2;
+    const y = h - 2 - ((v-min)/range) * (h-4);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.75"/></svg>`;
+}
+
+// ============================================================
+// RENDER: VARIAN LEDGER
+// ============================================================
+function renderLedger(pos){
+  const max = Math.max(...pos.map(p => Math.abs(p.net)), 1);
+  const rowsHtml = pos.map(p => {
+    const c = p.net >= 0 ? "var(--pos)" : "var(--neg)";
+    const tipe = tipeBroker(p.code);
+    return `
+    <div style="border-bottom:1px solid var(--border)">
+      <div style="display:grid;grid-template-columns:44px 1fr 88px 92px 106px;gap:12px;padding:13px 16px 6px;align-items:center">
+        <div class="mono" style="font-size:11.5px;font-weight:600;text-align:center;color:${tipe==='BANDAR'?'var(--gold)':'var(--muted)'};border:1px solid ${tipe==='BANDAR'?'var(--gold)':'var(--border)'};border-radius:2px;padding:3px 0">${esc(p.code)}</div>
+        <div style="font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.name)}${tipe!=='LAIN'?` <span style="font-size:10px;color:var(--faint);margin-left:8px">${tipe}</span>`:''}</div>
+        <div class="mono" style="font-size:12px;color:var(--muted);text-align:right">${lotFmt(p.buy)}</div>
+        <div class="mono" style="font-size:12px;color:var(--muted);text-align:right">${lotFmt(-p.sell)}</div>
+        <div class="mono" style="font-size:15px;font-weight:600;color:${c};text-align:right">${lotFmt(p.net)}</div>
+      </div>
+      <div style="padding:0 16px 12px">
+        <div style="height:3px;background:var(--bg);border-radius:2px">
+          <div style="height:100%;width:${(Math.abs(p.net)/max)*100}%;background:${c};border-radius:2px"></div>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+  return `
+    <div class="card">
+      <div class="mono" style="display:grid;grid-template-columns:44px 1fr 88px 92px 106px;gap:12px;padding:11px 16px;border-bottom:1px solid var(--border);font-size:10px;letter-spacing:1px;color:var(--faint);text-transform:uppercase">
+        <div>Kode</div><div>Broker</div><div style="text-align:right">Beli</div><div style="text-align:right">Jual</div><div style="text-align:right">Sisa</div>
+      </div>
+      ${rowsHtml}
+    </div>`;
+}
+
+// ============================================================
+// RENDER: VARIAN MATRIKS
+// ============================================================
+function renderMatriks(pos, days){
+  const maxDay = Math.max(...pos.flatMap(p => days.map(d => Math.abs(p.perDay[d]||0))), 1);
+  const header = `<div class="mono" style="display:grid;grid-template-columns:150px repeat(${days.length},1fr) 100px;gap:6px;padding:11px 16px;border-bottom:1px solid var(--border);font-size:10px;letter-spacing:1px;color:var(--faint);text-transform:uppercase">
+    <div>Broker</div>${days.map(d=>`<div style="text-align:center">${esc(d.slice(5))}</div>`).join("")}<div style="text-align:right">Sisa</div>
+  </div>`;
+  const rows = pos.map(p => {
+    const cells = days.map(d => {
+      const v = p.perDay[d] || 0;
+      const intensity = Math.abs(v)/maxDay;
+      const bg = v===0 ? "transparent" : v>0 ? `rgba(63,182,139,${0.12+intensity*0.55})` : `rgba(225,97,90,${0.12+intensity*0.55})`;
+      return `<div class="mono" style="background:${bg};border-radius:2px;padding:7px 3px;text-align:center;font-size:10.5px;color:${intensity>0.45?'var(--text)':'var(--muted)'}">${v===0?'\u00b7':lotFmt(v)}</div>`;
+    }).join("");
+    const c = p.net >= 0 ? "var(--pos)" : "var(--neg)";
+    return `<div style="display:grid;grid-template-columns:150px repeat(${days.length},1fr) 100px;gap:6px;padding:8px 16px;border-bottom:1px solid var(--border);align-items:center">
+      <div style="display:flex;align-items:center;gap:8px;overflow:hidden">
+        <span class="mono" style="font-size:11px;font-weight:600;color:${tipeBroker(p.code)==='BANDAR'?'var(--gold)':'var(--muted)'}">${esc(p.code)}</span>
+        <span style="font-size:11.5px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((p.name||"").split(" ")[0])}</span>
+      </div>
+      ${cells}
+      <div class="mono" style="font-size:13px;font-weight:600;text-align:right;color:${c}">${lotFmt(p.net)}</div>
+    </div>`;
+  }).join("");
+  return `<div class="card" style="overflow-x:auto"><div style="min-width:${Math.max(620,260+days.length*78)}px">${header}${rows}</div></div>`;
+}
+
+// ============================================================
+// RENDER: VARIAN KARTU
+// ============================================================
+function renderKartu(pos, days){
+  const cards = pos.map(p => {
+    const c = p.net >= 0 ? "var(--pos)" : "var(--neg)";
+    let run = 0;
+    const series = days.map(d => (run += (p.perDay[d]||0)));
+    const tipe = tipeBroker(p.code);
+    return `
+    <div class="card" style="border-left:3px solid ${c};padding:15px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+        <div style="min-width:0">
+          <div class="display" style="font-size:17px;font-weight:700;color:var(--text)">${esc(p.code)}</div>
+          <div style="font-size:11px;color:var(--faint);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.name)}</div>
+        </div>
+        ${tipe!=='LAIN' ? `<div class="badge" style="flex-shrink:0;color:${tipe==='BANDAR'?'var(--gold)':'var(--muted)'}">${tipe}</div>` : ''}
+      </div>
+      <div style="display:flex;align-items:baseline;gap:7px;margin-top:13px">
+        <span class="mono" style="font-size:24px;font-weight:600;color:${c}">${lotFmt(p.net)}</span>
+        <span style="font-size:11px;color:var(--faint)">lot tersisa</span>
+      </div>
+      ${days.length>1 ? `<div style="margin:10px 0 12px">${sparklineSVG(series, c, 230, 34)}</div>` : ''}
+      <div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:${days.length>1?0:12}px;border-top:1px solid var(--border)" class="mono">
+        <span style="font-size:11px;color:var(--muted)"><span style="color:var(--faint)">beli </span>${lotFmt(p.buy)}</span>
+        <span style="font-size:11px;color:var(--muted)"><span style="color:var(--faint)">jual </span>${lotFmt(-p.sell)}</span>
+        ${p.avg ? `<span style="font-size:11px;color:var(--muted)"><span style="color:var(--faint)">avg </span>${Math.round(p.avg)}</span>` : ''}
+      </div>
+    </div>`;
+  }).join("");
+  return `<div class="grid-cards">${cards}</div>`;
+}
+
+// ============================================================
+// MODALS
+// ============================================================
+function openUploadModal(){ state.showUpload = true; render(); }
+function closeUploadModal(){ state.showUpload = false; render(); }
+function openConnectModal(){ state.showConnect = true; render(); }
+function closeConnectModal(){ state.showConnect = false; render(); }
+
+function doImportFromTextarea(){
+  const text = document.getElementById("upload-textarea").value.trim();
+  const errEl = document.getElementById("upload-error");
+  if(!text){ errEl.textContent = "Tempel data CSV dulu."; errEl.style.display = "block"; return; }
+  const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+  const rows = (parsed.data||[]).filter(r => r.date && r.ticker && r.broker_code && r.side);
+  if(rows.length === 0){
+    errEl.textContent = "Tidak ada baris valid. Butuh kolom: date, ticker, broker_code, side, lot.";
+    errEl.style.display = "block";
+    return;
+  }
+  saveRows(mergeIncoming(rows));
+  closeUploadModal();
+}
+
+async function doTestAndSaveConnection(){
+  const url = document.getElementById("connect-url").value.trim();
+  const token = document.getElementById("connect-token").value.trim();
+  const errEl = document.getElementById("connect-error");
+  const btn = document.getElementById("connect-btn");
+  if(!url || !token){ errEl.textContent = "Isi URL dan token dulu."; errEl.style.display = "block"; return; }
+  btn.textContent = "Menguji..."; btn.disabled = true;
+  try{
+    await testAndSaveConnection(url, token);
+    closeConnectModal();
+  } catch(e){
+    errEl.textContent = e.message || "Gagal menghubungi URL itu. Cek lagi URL-nya benar dan sudah di-deploy.";
+    errEl.style.display = "block";
+  }
+  btn.textContent = "Uji & Simpan"; btn.disabled = false;
+}
+
+function modalsHtml(){
+  let html = "";
+  if(state.showUpload){
+    html += `
+    <div class="modal-overlay" onclick="closeUploadModal()">
+      <div class="modal-box" onclick="event.stopPropagation()">
+        <div class="modal-head">
+          <div>
+            <div class="display" style="font-size:16.5px;font-weight:600">Masukkan data broker</div>
+            <div style="font-size:12.5px;color:var(--muted);margin-top:3px">Salin isi sheet <span class="mono">broker_positions</span> berikut barisan judulnya</div>
+          </div>
+          <span onclick="closeUploadModal()" style="cursor:pointer;color:var(--muted);font-size:20px;line-height:1">&times;</span>
+        </div>
+        <div class="modal-body">
+          <textarea id="upload-textarea" rows="8" placeholder="date,ticker,broker_code,broker_name,side,lot,value,avg"></textarea>
+          <div style="margin-top:12px">
+            <a href="#" onclick="document.getElementById('upload-textarea').value = SAMPLE; return false;" style="font-size:12.5px;text-decoration:underline">pakai contoh data</a>
+          </div>
+          <div id="upload-error" style="display:none;margin-top:12px;padding:8px 12px;border-radius:3px;background:#331E20;color:var(--neg);font-size:12.5px"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn" onclick="closeUploadModal()">Batal</button>
+          <button class="btn btn-gold" onclick="doImportFromTextarea()">Import data</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  if(state.showConnect){
+    const c = state.connection || {};
+    html += `
+    <div class="modal-overlay" onclick="closeConnectModal()">
+      <div class="modal-box" onclick="event.stopPropagation()">
+        <div class="modal-head">
+          <div>
+            <div class="display" style="font-size:16.5px;font-weight:600">Sambungkan otomatis</div>
+            <div style="font-size:12.5px;color:var(--muted);margin-top:3px">Pakai URL Web App dari Apps Script yang sudah kamu deploy</div>
+          </div>
+          <span onclick="closeConnectModal()" style="cursor:pointer;color:var(--muted);font-size:20px;line-height:1">&times;</span>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:11.5px;color:var(--faint);margin-bottom:5px">Web App URL</div>
+          <input id="connect-url" placeholder="https://script.google.com/macros/s/.../exec" value="${esc(c.url||'')}">
+          <div style="font-size:11.5px;color:var(--faint);margin:14px 0 5px">Token rahasia</div>
+          <input id="connect-token" type="password" placeholder="kode rahasia dari SECRET_TOKEN" value="${esc(c.token||'')}">
+          <div id="connect-error" style="display:none;margin-top:12px;padding:8px 12px;border-radius:3px;background:#331E20;color:var(--neg);font-size:12.5px"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn" onclick="closeConnectModal()">Batal</button>
+          <button id="connect-btn" class="btn btn-gold" onclick="doTestAndSaveConnection()">Uji & Simpan</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  return html;
+}
+
+// ============================================================
+// MAIN RENDER
+// ============================================================
+function render(){
+  const tickers = Array.from(new Set(state.rows.map(r => r.ticker))).sort();
+  if(!state.ticker && tickers.length) state.ticker = tickers[0];
+  const active = state.ticker;
+  const scoped = state.rows.filter(r => r.ticker === active);
+  const days = Array.from(new Set(scoped.map(r => r.date))).sort();
+  const positions = computePositions(scoped);
+
+  const bandarNet = positions.filter(p => tipeBroker(p.code)==='BANDAR').reduce((a,c)=>a+c.net,0);
+  const ritelNet = positions.filter(p => tipeBroker(p.code)==='RITEL').reduce((a,c)=>a+c.net,0);
+  const arah = bandarNet>0 && ritelNet<0 ? "Ritel \u2192 Bandar" : bandarNet<0 && ritelNet>0 ? "Bandar \u2192 Ritel" : "Belum jelas";
+
+  const root = document.getElementById("root");
+
+  if(state.rows.length === 0){
+    root.innerHTML = `
+    <div class="wrap">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:22px">
+        <div>
+          <div class="mono" style="font-size:10.5px;letter-spacing:1.5px;color:var(--faint);text-transform:uppercase;margin-bottom:5px">Posisi barang broker</div>
+          <h1 class="display" style="font-size:27px;font-weight:700;margin:0">Belum ada saham</h1>
+        </div>
+      </div>
+      <div style="border:1px dashed var(--border);border-radius:4px;padding:58px 24px;text-align:center">
+        <div class="display" style="font-size:18px;margin-bottom:8px">Belum ada data broker</div>
+        <div style="font-size:13.5px;color:var(--muted);max-width:460px;margin:0 auto 20px;line-height:1.6">
+          Sambungkan otomatis ke Apps Script, atau tempel manual dari Google Sheets.
+        </div>
+        <div style="display:flex;gap:10px;justify-content:center">
+          <button class="btn btn-gold" onclick="openConnectModal()">Sambungkan otomatis</button>
+          <button class="btn" onclick="openUploadModal()">Tempel manual</button>
+        </div>
+      </div>
+    </div>
+    ${modalsHtml()}`;
+    return;
+  }
+
+  const syncStatusHtml = state.connection ? `
+    <div class="mono" style="display:flex;align-items:center;gap:6px;font-size:11px;color:${state.syncError?'var(--neg)':'var(--faint)'}">
+      <div style="width:6px;height:6px;border-radius:50%;background:${state.syncError?'var(--neg)':'var(--pos)'}"></div>
+      ${state.syncing ? "sinkron..." : state.syncError ? "gagal sinkron" : state.lastSync ? `sinkron ${state.lastSync}` : "tersambung"}
+    </div>
+    <button class="btn" onclick="syncNow()" ${state.syncing?'disabled':''}><span class="${state.syncing?'spin':''}">&#8635;</span></button>
+  ` : "";
+
+  root.innerHTML = `
+  <div class="wrap">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:22px">
+      <div>
+        <div class="mono" style="font-size:10.5px;letter-spacing:1.5px;color:var(--faint);text-transform:uppercase;margin-bottom:5px">Posisi barang broker</div>
+        <h1 class="display" style="font-size:27px;font-weight:700;margin:0">${esc(active)}</h1>
+        ${days.length ? `<div style="font-size:12.5px;color:var(--muted);margin-top:4px">Akumulasi ${days.length} hari bursa &middot; ${esc(days[0])} s/d ${esc(days[days.length-1])}</div>` : ''}
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        ${syncStatusHtml}
+        <a href="backtest.html" class="btn" style="text-decoration:none">Backtest</a>
+        <button class="btn" onclick="openConnectModal()">${state.connection ? "Ubah koneksi" : "Sambungkan otomatis"}</button>
+        <button class="btn" onclick="if(confirm('Hapus semua data tersimpan?')){ saveRows([]); render(); }">Hapus semua</button>
+        <button class="btn btn-gold" onclick="openUploadModal()">Tempel manual</button>
+      </div>
+    </div>
+
+    ${state.syncError ? `<div style="margin-bottom:16px;padding:10px 14px;border-radius:3px;background:#331E20;color:var(--neg);font-size:12.5px">${esc(state.syncError)}</div>` : ""}
+
+    <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+      <div class="card" style="flex:1 1 200px;border-left:3px solid ${bandarNet>=0?'var(--pos)':'var(--neg)'};padding:14px 16px">
+        <div class="mono" style="font-size:10px;letter-spacing:1px;color:var(--faint);text-transform:uppercase">Barang di tangan bandar</div>
+        <div class="display" style="font-size:25px;font-weight:700;color:${bandarNet>=0?'var(--pos)':'var(--neg)'};margin-top:3px">${lotFmt(bandarNet)} <span style="font-size:12px;font-weight:500;color:var(--faint)">lot</span></div>
+      </div>
+      <div class="card" style="flex:1 1 200px;border-left:3px solid ${ritelNet>=0?'var(--pos)':'var(--neg)'};padding:14px 16px">
+        <div class="mono" style="font-size:10px;letter-spacing:1px;color:var(--faint);text-transform:uppercase">Barang di tangan ritel</div>
+        <div class="display" style="font-size:25px;font-weight:700;color:${ritelNet>=0?'var(--pos)':'var(--neg)'};margin-top:3px">${lotFmt(ritelNet)} <span style="font-size:12px;font-weight:500;color:var(--faint)">lot</span></div>
+      </div>
+      <div class="card" style="flex:1 1 200px;border-left:3px solid var(--gold);padding:14px 16px">
+        <div class="mono" style="font-size:10px;letter-spacing:1px;color:var(--faint);text-transform:uppercase">Arah perpindahan</div>
+        <div class="display" style="font-size:17px;font-weight:600;color:var(--gold);margin-top:6px">${arah}</div>
+      </div>
+    </div>
+
+    <div class="tab">
+      ${tickers.length>1 ? `<select onchange="state.ticker=this.value;render()">${tickers.map(t=>`<option value="${esc(t)}" ${t===active?'selected':''}>${esc(t)}</option>`).join("")}</select>` : ''}
+      <button class="btn ${state.varian==='ledger'?'btn-gold':''}" onclick="state.varian='ledger';render()">Ledger</button>
+      <button class="btn ${state.varian==='matriks'?'btn-gold':''}" onclick="state.varian='matriks';render()">Matriks harian</button>
+      <button class="btn ${state.varian==='kartu'?'btn-gold':''}" onclick="state.varian='kartu';render()">Kartu posisi</button>
+    </div>
+
+    ${state.varian==='ledger' ? renderLedger(positions) : state.varian==='matriks' ? renderMatriks(positions, days) : renderKartu(positions, days)}
+
+    <div style="margin-top:30px;padding-top:18px;border-top:1px solid var(--border);font-size:11.5px;color:var(--faint);line-height:1.65">
+      Angka sisa barang dihitung dari selisih beli dan jual yang tercatat di data yang kamu masukkan &mdash;
+      bukan posisi sebenarnya broker, karena data sebelum rentang ini tidak diketahui.
+      Bukan rekomendasi finansial.
+    </div>
+  </div>
+  ${modalsHtml()}`;
+}
+
+// jalankan pertama kali, lalu auto-sync kalau sudah pernah connect
+render();
+if(state.connection) syncNow();
+</script>
+</body>
+</html>
