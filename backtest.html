@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Backtest — Panel Bacaan Bandar</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --bg: #0B1220; --panel: #141C2E; --border: #232C42; --borderHi: #2E3954;
+    --text: #EDEAE2; --muted: #8B93A7; --faint: #59627A;
+    --gold: #C9A227; --pos: #3FB68B; --neg: #E1615A;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: 'IBM Plex Sans', sans-serif; }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+  .display { font-family: 'Space Grotesk', sans-serif; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 26px 22px 60px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+    font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; border-radius: 3px;
+    padding: 9px 16px; border: 1px solid var(--border); background: none; color: var(--muted);
+  }
+  .btn-gold { background: var(--gold); color: var(--bg); font-weight: 600; border: none; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; }
+  input { background: var(--bg); border: 1px solid var(--border); border-radius: 3px; color: var(--text); font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; padding: 9px 10px; outline: none; width: 100%; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { padding: 9px 12px; text-align: left; font-size: 12.5px; }
+  th { font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 1px; color: var(--faint); text-transform: uppercase; border-bottom: 1px solid var(--border); }
+  tr:not(:last-child) td { border-bottom: 1px solid var(--border); }
+  a { color: var(--gold); }
+  .warn { background: #3A3020; border: 1px solid #5A4A2A; color: #E8C468; border-radius: 4px; padding: 12px 16px; font-size: 12.5px; line-height: 1.6; }
+  .nav { display: flex; gap: 8px; margin-bottom: 20px; }
+  .nav a { text-decoration: none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+const T = { pos: "#3FB68B", neg: "#E1615A", gold: "#C9A227" };
+
+let state = {
+  rows: [],
+  connection: JSON.parse(localStorage.getItem("bdm_connection") || "null"),
+  horizon: 3,
+  loading: false,
+  error: "",
+};
+
+function esc(s){ const d=document.createElement("div"); d.textContent = s==null?"":String(s); return d.innerHTML; }
+function pct(n){ return (n>=0?"+":"") + (n*100).toFixed(1) + "%"; }
+
+async function loadData(){
+  if(!state.connection){ render(); return; }
+  state.loading = true; state.error = ""; render();
+  try{
+    const c = state.connection;
+    const sep = c.url.includes("?") ? "&" : "?";
+    const res = await fetch(`${c.url}${sep}token=${encodeURIComponent(c.token)}&sheet=daily_log`);
+    const json = await res.json();
+    if(json.error){ state.error = json.error; }
+    else {
+      state.rows = (json.data||[]).map(r => ({
+        ...r,
+        close: Number(r.close),
+        score: Number(r.score),
+      })).filter(r => r.date && r.ticker && !isNaN(r.close));
+    }
+  } catch(e){
+    state.error = "Gagal mengambil data. Cek koneksi Apps Script.";
+  }
+  state.loading = false;
+  render();
+}
+
+function runBacktest(rows, horizon){
+  // Kelompokkan per ticker, urutkan berdasarkan tanggal
+  const byTicker = {};
+  rows.forEach(r => {
+    if(!byTicker[r.ticker]) byTicker[r.ticker] = [];
+    byTicker[r.ticker].push(r);
+  });
+  Object.values(byTicker).forEach(arr => arr.sort((a,b) => new Date(a.date) - new Date(b.date)));
+
+  const signals = [];
+  Object.entries(byTicker).forEach(([ticker, arr]) => {
+    arr.forEach((row, i) => {
+      const verdict = (row.verdict || "").toUpperCase();
+      if(verdict !== "BUY" && verdict !== "SELL") return;
+      const future = arr[i + horizon];
+      if(!future) return; // belum ada data N hari ke depan
+      const ret = (future.close - row.close) / row.close;
+      const correct = verdict === "BUY" ? ret > 0 : ret < 0;
+      signals.push({
+        ticker, date: row.date, verdict, score: row.score,
+        closeAwal: row.close, closeAkhir: future.close, tanggalAkhir: future.date,
+        ret, correct,
+      });
+    });
+  });
+  return signals;
+}
+
+function renderStatCard(label, value, color){
+  return `<div class="card" style="flex:1 1 160px;padding:14px 16px;border-left:3px solid ${color}">
+    <div class="mono" style="font-size:10px;letter-spacing:1px;color:var(--faint);text-transform:uppercase">${esc(label)}</div>
+    <div class="display" style="font-size:24px;font-weight:700;color:${color};margin-top:4px">${value}</div>
+  </div>`;
+}
+
+function render(){
+  const root = document.getElementById("root");
+
+  if(!state.connection){
+    root.innerHTML = `
+    <div class="wrap">
+      <div class="nav"><a href="index.html" class="btn">&larr; Kembali ke Dashboard</a><a href="ownership.html" class="btn">Kepemilikan</a></div>
+      <h1 class="display" style="font-size:27px;font-weight:700">Backtest</h1>
+      <div class="card" style="padding:40px 24px;text-align:center;margin-top:20px">
+        <div style="font-size:14px;color:var(--muted)">Belum tersambung ke Apps Script. Buka Dashboard utama dan sambungkan dulu di sana -- koneksinya akan otomatis dipakai juga di sini.</div>
+      </div>
+    </div>`;
+    return;
+  }
+
+  const signals = runBacktest(state.rows, state.horizon);
+  const buys = signals.filter(s => s.verdict === "BUY");
+  const sells = signals.filter(s => s.verdict === "SELL");
+  const buyWins = buys.filter(s => s.correct).length;
+  const sellWins = sells.filter(s => s.correct).length;
+  const totalWins = buyWins + sellWins;
+  const total = signals.length;
+  const winRate = total ? (totalWins / total) : null;
+
+  const avgRet = (arr) => arr.length ? arr.reduce((a,s) => a+s.ret, 0) / arr.length : null;
+
+  const lowDataWarning = total < 20 ? `
+    <div class="warn" style="margin-bottom:20px">
+      <strong>Data masih terlalu sedikit (${total} sinyal BUY/SELL yang bisa dievaluasi).</strong>
+      Winrate di bawah ini BUKAN kesimpulan yang bisa diandalkan -- angka dari sampel sekecil ini
+      gampang sekali menyesatkan (satu-dua kejadian kebetulan bisa mengubah persentase drastis).
+      Jalankan scan harian terus selama beberapa minggu sebelum mempercayai angka ini untuk keputusan nyata.
+    </div>` : "";
+
+  root.innerHTML = `
+  <div class="wrap">
+    <div class="nav"><a href="index.html" class="btn">&larr; Kembali ke Dashboard</a><a href="ownership.html" class="btn">Kepemilikan</a></div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;margin-bottom:20px">
+      <div>
+        <div class="mono" style="font-size:10.5px;letter-spacing:1.5px;color:var(--faint);text-transform:uppercase;margin-bottom:5px">Evaluasi sistem skor</div>
+        <h1 class="display" style="font-size:27px;font-weight:700;margin:0">Backtest</h1>
+        <div style="font-size:12.5px;color:var(--muted);margin-top:4px">${state.rows.length} baris data historis dimuat</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span style="font-size:12.5px;color:var(--muted)">Horizon:</span>
+        ${[1,3,5].map(h => `<button class="btn ${state.horizon===h?'btn-gold':''}" onclick="state.horizon=${h};render()">${h} hari</button>`).join("")}
+        <button class="btn" onclick="loadData()">${state.loading?'Memuat...':'Refresh'}</button>
+      </div>
+    </div>
+
+    ${state.error ? `<div class="warn" style="margin-bottom:20px;background:#331E20;border-color:#5A2A2A;color:var(--neg)">${esc(state.error)}</div>` : ""}
+    ${lowDataWarning}
+
+    <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+      ${renderStatCard("Total sinyal", total, "var(--text)")}
+      ${renderStatCard("Winrate keseluruhan", winRate!==null ? (winRate*100).toFixed(0)+"%" : "-", winRate>=0.5?T.pos:T.neg)}
+      ${renderStatCard("Akurasi BUY", buys.length ? (buyWins/buys.length*100).toFixed(0)+"% ("+buyWins+"/"+buys.length+")" : "-", T.pos)}
+      ${renderStatCard("Akurasi SELL", sells.length ? (sellWins/sells.length*100).toFixed(0)+"% ("+sellWins+"/"+sells.length+")" : "-", T.neg)}
+    </div>
+
+    <div style="display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap">
+      ${renderStatCard("Avg return saat BUY", avgRet(buys)!==null ? pct(avgRet(buys)) : "-", T.pos)}
+      ${renderStatCard("Avg return saat SELL", avgRet(sells)!==null ? pct(avgRet(sells)) : "-", T.neg)}
+    </div>
+
+    <div class="card" style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th>Tanggal</th><th>Ticker</th><th>Verdict</th><th>Skor</th>
+          <th>Close awal</th><th>Close +${state.horizon}h</th><th>Return</th><th>Hasil</th>
+        </tr></thead>
+        <tbody>
+          ${signals.length === 0 ? `<tr><td colspan="8" style="text-align:center;color:var(--faint);padding:24px">Belum ada sinyal BUY/SELL dengan data ${state.horizon} hari ke depan yang cukup.</td></tr>` : ""}
+          ${signals.sort((a,b)=>new Date(b.date)-new Date(a.date)).map(s => `
+            <tr>
+              <td class="mono">${esc(s.date)}</td>
+              <td class="mono" style="font-weight:600">${esc(s.ticker)}</td>
+              <td class="mono" style="color:${s.verdict==='BUY'?T.pos:T.neg}">${esc(s.verdict)}</td>
+              <td class="mono">${s.score}</td>
+              <td class="mono">${s.closeAwal.toLocaleString('id-ID')}</td>
+              <td class="mono">${s.closeAkhir.toLocaleString('id-ID')} <span style="color:var(--faint);font-size:10.5px">(${esc(s.tanggalAkhir)})</span></td>
+              <td class="mono" style="color:${s.ret>=0?T.pos:T.neg}">${pct(s.ret)}</td>
+              <td class="mono" style="color:${s.correct?T.pos:T.neg}">${s.correct ? "BENAR" : "MELESET"}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>
+
+    <div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border);font-size:11.5px;color:var(--faint);line-height:1.6">
+      "Benar" berarti harga bergerak searah dengan verdict dalam ${state.horizon} hari bursa setelah tanggal sinyal.
+      Sinyal NEUTRAL tidak dievaluasi karena tidak ada arah yang diprediksi. Ini bukan rekomendasi finansial --
+      gunakan untuk mengevaluasi dan mengkalibrasi sistem skor kamu sendiri seiring waktu.
+    </div>
+  </div>`;
+}
+
+loadData();
+</script>
+</body>
+</html>
