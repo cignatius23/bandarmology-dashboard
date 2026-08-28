@@ -20,6 +20,12 @@
   .mono { font-family: 'IBM Plex Mono', monospace; }
   .display { font-family: 'Space Grotesk', sans-serif; }
   .wrap { max-width: 1120px; margin: 0 auto; padding: 26px 22px 60px; }
+  .layout { display: grid; grid-template-columns: 1fr 260px; gap: 18px; align-items: start; }
+  .sidebar { position: sticky; top: 20px; }
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { position: static; }
+  }
   .btn {
     display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
     font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; border-radius: 3px;
@@ -228,24 +234,43 @@ function renderMonthList(items) {
   `).join("");
 }
 
+// Versi ramping untuk sidebar -- tiap bulan cuma angka + panah + delta, tanpa label bulan besar
+function renderMonthListCompact(items) {
+  return items.map(item => `
+    <div style="padding:12px 0;border-bottom:1px solid var(--border)">
+      <div class="mono" style="font-size:10px;color:var(--faint);letter-spacing:0.4px;margin-bottom:4px">${esc(item.label)}</div>
+      ${item.val === null ? `
+        <div class="mono" style="font-size:12.5px;color:var(--faint)">Belum ada data</div>
+      ` : `
+        <div style="display:flex;align-items:baseline;gap:6px;flex-wrap:wrap">
+          <span class="display" style="font-size:16px;font-weight:700;color:var(--text)">${numFmtSid(item.val)}</span>
+          ${item.arrow ? `<span style="font-size:12px;color:${item.color}">${item.arrow}</span>` : ''}
+        </div>
+        ${item.delta !== null ? `<div class="mono" style="font-size:10.5px;color:${item.color};margin-top:2px">${item.delta>0?'+':''}${numFmtSid(item.delta)}</div>` : ''}
+      `}
+    </div>
+  `).join("");
+}
+
 // Kartu SID -- ikut berubah sesuai ticker yang lagi aktif di dashboard
+// Dipakai sebagai panel sidebar di sisi kanan dashboard
 function renderSidCard(activeTicker){
   if(!state.connection){
     return `
-    <div class="card" style="padding:20px;margin-bottom:20px">
-      <div class="mono" style="font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">SID / Kepemilikan Individual (Lokal)</div>
-      <div style="font-size:13px;color:var(--muted)">Sambungkan otomatis dulu untuk melihat data SID.</div>
+    <div class="card" style="padding:16px">
+      <div class="mono" style="font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">SID / Kepemilikan</div>
+      <div style="font-size:12px;color:var(--muted)">Sambungkan otomatis dulu untuk melihat data SID.</div>
     </div>`;
   }
   const history = state.kseiRows.filter(r => r.ticker === activeTicker);
-  const monthList = buildMonthList(history);
+  const monthList = buildMonthList(history).slice(-6); // 6 bulan terakhir biar muat di sidebar
   return `
-  <div class="card" style="padding:20px;margin-bottom:20px">
-    <div class="display" style="font-size:18px;font-weight:700;margin-bottom:2px">${esc(activeTicker || "-")}</div>
-    <div class="mono" style="font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:1px;margin-bottom:14px">SID / Kepemilikan Individual (Lokal)</div>
-    ${state.kseiLoading ? `<div style="color:var(--faint);font-size:13px;padding:16px 0">Memuat data SID...</div>` :
-      state.kseiError ? `<div style="color:var(--neg);font-size:13px;padding:16px 0">${esc(state.kseiError)}</div>` :
-      monthList.length ? renderMonthList(monthList) : `<div style="color:var(--faint);font-size:13px;padding:16px 0">Belum ada data SID untuk ${esc(activeTicker || "saham ini")}.</div>`}
+  <div class="card" style="padding:16px">
+    <div class="display" style="font-size:14px;font-weight:700;margin-bottom:1px">${esc(activeTicker || "-")}</div>
+    <div class="mono" style="font-size:9.5px;color:var(--faint);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:10px">SID / Individual (Lokal)</div>
+    ${state.kseiLoading ? `<div style="color:var(--faint);font-size:12px;padding:12px 0">Memuat...</div>` :
+      state.kseiError ? `<div style="color:var(--neg);font-size:12px;padding:12px 0">${esc(state.kseiError)}</div>` :
+      monthList.length ? renderMonthListCompact(monthList) : `<div style="color:var(--faint);font-size:12px;padding:12px 0">Belum ada data SID.</div>`}
   </div>`;
 }
 
@@ -523,55 +548,62 @@ function render(){
 
   root.innerHTML = `
   <div class="wrap">
+  <div class="layout">
 
-    ${renderSidCard(active)}
-
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:22px">
-      <div>
-        <div class="mono" style="font-size:10.5px;letter-spacing:1.5px;color:var(--faint);text-transform:uppercase;margin-bottom:5px">Posisi barang broker</div>
-        <h1 class="display" style="font-size:27px;font-weight:700;margin:0">${esc(active)}</h1>
-        ${days.length ? `<div style="font-size:12.5px;color:var(--muted);margin-top:4px">Akumulasi ${days.length} hari bursa &middot; ${esc(days[0])} s/d ${esc(days[days.length-1])}</div>` : ''}
+    <div class="main">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:22px">
+        <div>
+          <div class="mono" style="font-size:10.5px;letter-spacing:1.5px;color:var(--faint);text-transform:uppercase;margin-bottom:5px">Posisi barang broker</div>
+          <h1 class="display" style="font-size:27px;font-weight:700;margin:0">${esc(active)}</h1>
+          ${days.length ? `<div style="font-size:12.5px;color:var(--muted);margin-top:4px">Akumulasi ${days.length} hari bursa &middot; ${esc(days[0])} s/d ${esc(days[days.length-1])}</div>` : ''}
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          ${syncStatusHtml}
+          <a href="backtest.html" class="btn" style="text-decoration:none">Backtest</a>
+          <button class="btn" onclick="openConnectModal()">${state.connection ? "Ubah koneksi" : "Sambungkan otomatis"}</button>
+          <button class="btn" onclick="if(confirm('Hapus semua data tersimpan?')){ saveRows([]); render(); }">Hapus semua</button>
+          <button class="btn btn-gold" onclick="openUploadModal()">Tempel manual</button>
+        </div>
       </div>
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        ${syncStatusHtml}
-        <a href="backtest.html" class="btn" style="text-decoration:none">Backtest</a>
-        <button class="btn" onclick="openConnectModal()">${state.connection ? "Ubah koneksi" : "Sambungkan otomatis"}</button>
-        <button class="btn" onclick="if(confirm('Hapus semua data tersimpan?')){ saveRows([]); render(); }">Hapus semua</button>
-        <button class="btn btn-gold" onclick="openUploadModal()">Tempel manual</button>
+
+      ${state.syncError ? `<div style="margin-bottom:16px;padding:10px 14px;border-radius:3px;background:#331E20;color:var(--neg);font-size:12.5px">${esc(state.syncError)}</div>` : ""}
+
+      <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+        <div class="card" style="flex:1 1 200px;border-left:3px solid ${bandarNet>=0?'var(--pos)':'var(--neg)'};padding:14px 16px">
+          <div class="mono" style="font-size:10px;letter-spacing:1px;color:var(--faint);text-transform:uppercase">Barang di tangan bandar</div>
+          <div class="display" style="font-size:25px;font-weight:700;color:${bandarNet>=0?'var(--pos)':'var(--neg)'};margin-top:3px">${lotFmt(bandarNet)} <span style="font-size:12px;font-weight:500;color:var(--faint)">lot</span></div>
+        </div>
+        <div class="card" style="flex:1 1 200px;border-left:3px solid ${ritelNet>=0?'var(--pos)':'var(--neg)'};padding:14px 16px">
+          <div class="mono" style="font-size:10px;letter-spacing:1px;color:var(--faint);text-transform:uppercase">Barang di tangan ritel</div>
+          <div class="display" style="font-size:25px;font-weight:700;color:${ritelNet>=0?'var(--pos)':'var(--neg)'};margin-top:3px">${lotFmt(ritelNet)} <span style="font-size:12px;font-weight:500;color:var(--faint)">lot</span></div>
+        </div>
+        <div class="card" style="flex:1 1 200px;border-left:3px solid var(--gold);padding:14px 16px">
+          <div class="mono" style="font-size:10px;letter-spacing:1px;color:var(--faint);text-transform:uppercase">Arah perpindahan</div>
+          <div class="display" style="font-size:17px;font-weight:600;color:var(--gold);margin-top:6px">${arah}</div>
+        </div>
+      </div>
+
+      <div class="tab">
+        ${tickers.length>1 ? `<select onchange="state.ticker=this.value;render()">${tickers.map(t=>`<option value="${esc(t)}" ${t===active?'selected':''}>${esc(t)}</option>`).join("")}</select>` : ''}
+        <button class="btn ${state.varian==='ledger'?'btn-gold':''}" onclick="state.varian='ledger';render()">Ledger</button>
+        <button class="btn ${state.varian==='matriks'?'btn-gold':''}" onclick="state.varian='matriks';render()">Matriks harian</button>
+        <button class="btn ${state.varian==='kartu'?'btn-gold':''}" onclick="state.varian='kartu';render()">Kartu posisi</button>
+      </div>
+
+      ${state.varian==='ledger' ? renderLedger(positions) : state.varian==='matriks' ? renderMatriks(positions, days) : renderKartu(positions, days)}
+
+      <div style="margin-top:30px;padding-top:18px;border-top:1px solid var(--border);font-size:11.5px;color:var(--faint);line-height:1.65">
+        Angka sisa barang dihitung dari selisih beli dan jual yang tercatat di data yang kamu masukkan &mdash;
+        bukan posisi sebenarnya broker, karena data sebelum rentang ini tidak diketahui.
+        Bukan rekomendasi finansial.
       </div>
     </div>
 
-    ${state.syncError ? `<div style="margin-bottom:16px;padding:10px 14px;border-radius:3px;background:#331E20;color:var(--neg);font-size:12.5px">${esc(state.syncError)}</div>` : ""}
-
-    <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">
-      <div class="card" style="flex:1 1 200px;border-left:3px solid ${bandarNet>=0?'var(--pos)':'var(--neg)'};padding:14px 16px">
-        <div class="mono" style="font-size:10px;letter-spacing:1px;color:var(--faint);text-transform:uppercase">Barang di tangan bandar</div>
-        <div class="display" style="font-size:25px;font-weight:700;color:${bandarNet>=0?'var(--pos)':'var(--neg)'};margin-top:3px">${lotFmt(bandarNet)} <span style="font-size:12px;font-weight:500;color:var(--faint)">lot</span></div>
-      </div>
-      <div class="card" style="flex:1 1 200px;border-left:3px solid ${ritelNet>=0?'var(--pos)':'var(--neg)'};padding:14px 16px">
-        <div class="mono" style="font-size:10px;letter-spacing:1px;color:var(--faint);text-transform:uppercase">Barang di tangan ritel</div>
-        <div class="display" style="font-size:25px;font-weight:700;color:${ritelNet>=0?'var(--pos)':'var(--neg)'};margin-top:3px">${lotFmt(ritelNet)} <span style="font-size:12px;font-weight:500;color:var(--faint)">lot</span></div>
-      </div>
-      <div class="card" style="flex:1 1 200px;border-left:3px solid var(--gold);padding:14px 16px">
-        <div class="mono" style="font-size:10px;letter-spacing:1px;color:var(--faint);text-transform:uppercase">Arah perpindahan</div>
-        <div class="display" style="font-size:17px;font-weight:600;color:var(--gold);margin-top:6px">${arah}</div>
-      </div>
+    <div class="sidebar">
+      ${renderSidCard(active)}
     </div>
 
-    <div class="tab">
-      ${tickers.length>1 ? `<select onchange="state.ticker=this.value;render()">${tickers.map(t=>`<option value="${esc(t)}" ${t===active?'selected':''}>${esc(t)}</option>`).join("")}</select>` : ''}
-      <button class="btn ${state.varian==='ledger'?'btn-gold':''}" onclick="state.varian='ledger';render()">Ledger</button>
-      <button class="btn ${state.varian==='matriks'?'btn-gold':''}" onclick="state.varian='matriks';render()">Matriks harian</button>
-      <button class="btn ${state.varian==='kartu'?'btn-gold':''}" onclick="state.varian='kartu';render()">Kartu posisi</button>
-    </div>
-
-    ${state.varian==='ledger' ? renderLedger(positions) : state.varian==='matriks' ? renderMatriks(positions, days) : renderKartu(positions, days)}
-
-    <div style="margin-top:30px;padding-top:18px;border-top:1px solid var(--border);font-size:11.5px;color:var(--faint);line-height:1.65">
-      Angka sisa barang dihitung dari selisih beli dan jual yang tercatat di data yang kamu masukkan &mdash;
-      bukan posisi sebenarnya broker, karena data sebelum rentang ini tidak diketahui.
-      Bukan rekomendasi finansial.
-    </div>
+  </div>
   </div>
   ${modalsHtml()}`;
 }
