@@ -370,6 +370,8 @@ function sparklineSVG(values, color, w=100, h=32){
 // RENDER: VARIAN LEDGER
 // ============================================================
 function renderLedger(pos){
+  // filter: hanya broker yang masih PEGANG barang (net positif), ambil top 7
+  pos = pos.filter(p => p.net > 0).sort((a,b) => b.net - a.net).slice(0, 7);
   const max = Math.max(...pos.map(p => Math.abs(p.net)), 1);
   const rowsHtml = pos.map(p => {
     const c = p.net >= 0 ? "var(--pos)" : "var(--neg)";
