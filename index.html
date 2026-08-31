@@ -223,15 +223,15 @@ function buildMonthList(history) {
 
 function renderMonthList(items) {
   return items.map(item => `
-    <div style="padding:14px 0;border-bottom:1px solid var(--border)">
-      <div class="mono" style="font-size:12px;color:var(--faint);letter-spacing:0.5px;margin-bottom:6px">${esc(item.label)}</div>
+    <div style="padding:7px 0;border-bottom:1px solid var(--border)">
+      <div class="mono" style="font-size:10px;color:var(--faint);letter-spacing:0.5px;margin-bottom:2px">${esc(item.label)}</div>
       ${item.val === null ? `
-        <div class="mono" style="font-size:15px;color:var(--faint)">Belum ada data</div>
+        <div class="mono" style="font-size:11px;color:var(--faint)">Belum ada data</div>
       ` : `
-        <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
-          <span class="display" style="font-size:24px;font-weight:700;color:var(--text)">${numFmtSid(item.val)}</span>
-          ${item.arrow ? `<span style="font-size:16px;color:${item.color}">${item.arrow}</span>` : ''}
-          ${item.delta !== null ? `<span class="mono" style="font-size:13px;color:${item.color}">${item.delta>0?'+':''}${numFmtSid(item.delta)}</span>` : ''}
+        <div style="display:flex;align-items:baseline;gap:6px;flex-wrap:wrap">
+          <span class="display" style="font-size:13px;font-weight:700;color:var(--text)">${numFmtSid(item.val)}</span>
+          ${item.arrow ? `<span style="font-size:10px;color:${item.color}">${item.arrow}</span>` : ''}
+          ${item.delta !== null ? `<span class="mono" style="font-size:10px;color:${item.color}">${item.delta>0?'+':''}${numFmtSid(item.delta)}</span>` : ''}
         </div>
       `}
     </div>
@@ -242,20 +242,20 @@ function renderMonthList(items) {
 function renderSidCard(activeTicker){
   if(!state.connection){
     return `
-    <div class="card" style="padding:20px;margin-bottom:20px">
-      <div class="mono" style="font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">SID / Kepemilikan Individual (Lokal)</div>
-      <div style="font-size:13px;color:var(--muted)">Sambungkan otomatis dulu untuk melihat data SID.</div>
+    <div class="card" style="padding:12px;margin-bottom:12px">
+      <div class="mono" style="font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">SID / Kepemilikan Individual (Lokal)</div>
+      <div style="font-size:11px;color:var(--muted)">Sambungkan otomatis dulu untuk melihat data SID.</div>
     </div>`;
   }
   const history = state.kseiRows.filter(r => r.ticker === activeTicker);
   const monthList = buildMonthList(history);
   return `
-  <div class="card" style="padding:20px;margin-bottom:20px">
-    <div class="display" style="font-size:18px;font-weight:700;margin-bottom:2px">${esc(activeTicker || "-")}</div>
-    <div class="mono" style="font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:1px;margin-bottom:14px">SID / Kepemilikan Individual (Lokal)</div>
-    ${state.kseiLoading ? `<div style="color:var(--faint);font-size:13px;padding:16px 0">Memuat data SID...</div>` :
-      state.kseiError ? `<div style="color:var(--neg);font-size:13px;padding:16px 0">${esc(state.kseiError)}</div>` :
-      monthList.length ? renderMonthList(monthList) : `<div style="color:var(--faint);font-size:13px;padding:16px 0">Belum ada data SID untuk ${esc(activeTicker || "saham ini")}.</div>`}
+  <div class="card" style="padding:12px;margin-bottom:12px">
+    <div class="display" style="font-size:13px;font-weight:700;margin-bottom:1px">${esc(activeTicker || "-")}</div>
+    <div class="mono" style="font-size:9.5px;color:var(--faint);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">SID / Kepemilikan Individual (Lokal)</div>
+    ${state.kseiLoading ? `<div style="color:var(--faint);font-size:11px;padding:8px 0">Memuat data SID...</div>` :
+      state.kseiError ? `<div style="color:var(--neg);font-size:11px;padding:8px 0">${esc(state.kseiError)}</div>` :
+      monthList.length ? renderMonthList(monthList) : `<div style="color:var(--faint);font-size:11px;padding:8px 0">Belum ada data SID untuk ${esc(activeTicker || "saham ini")}.</div>`}
   </div>`;
 }
 
