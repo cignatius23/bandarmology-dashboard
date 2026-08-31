@@ -741,9 +741,11 @@ function render(){
         <button class="btn ${state.varian==='kartu'?'btn-gold':''}" onclick="state.varian='kartu';render()">Kartu posisi</button>
       </div>
 
-      ${state.varian==='ledger' ? renderLedger(positions) : state.varian==='matriks' ? renderMatriks(positions, days) : renderKartu(positions, days)}
-
       ${state.varian==='ledger' ? renderBrokerSummaryToday(scoped, days) : ''}
+
+      ${state.varian==='ledger' ? `<div style="margin-top:24px"></div>` : ''}
+
+      ${state.varian==='ledger' ? renderLedger(positions) : state.varian==='matriks' ? renderMatriks(positions, days) : renderKartu(positions, days)}
 
       <div style="margin-top:30px;padding-top:18px;border-top:1px solid var(--border);font-size:11.5px;color:var(--faint);line-height:1.65">
         Angka sisa barang dihitung dari selisih beli dan jual yang tercatat di data yang kamu masukkan &mdash;
