@@ -21,10 +21,10 @@
   .display { font-family: 'Space Grotesk', sans-serif; }
   .wrap { max-width: 1120px; margin: 0 auto; padding: 26px 22px 60px; }
   .layout { display: grid; grid-template-columns: 1fr 260px; gap: 18px; align-items: start; }
-  .sidebar { position: sticky; top: 20px; display: flex; flex-direction: column; gap: 14px; }
+  .sidebar { position: sticky; top: 20px; }
   @media (max-width: 860px) {
     .layout { grid-template-columns: 1fr; }
-    .sidebar { position: static; flex-direction: row; flex-wrap: wrap; }
+    .sidebar { position: static; }
   }
   .btn {
     display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
@@ -33,11 +33,7 @@
   }
   .btn-gold { background: var(--gold); color: var(--bg); font-weight: 600; border: none; }
   .btn:hover { border-color: var(--borderHi); }
-  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 16px; }
-  .card-title { font-size: 11px; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase; color: var(--muted); margin-bottom: 12px; }
-  .metric-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; font-size: 12px; }
-  .metric-label { color: var(--muted); }
-  .metric-value { font-family: 'IBM Plex Mono', monospace; font-weight: 600; color: var(--text); }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; }
   input, select, textarea {
     background: var(--bg); border: 1px solid var(--border); border-radius: 3px;
     color: var(--text); font-family: 'IBM Plex Mono', monospace; font-size: 12.5px;
@@ -97,46 +93,34 @@ let state = {
   showConnect: false,
   kseiRows: [],
   kseiLoading: false,
-  kseiError: "",
-  fundamentalRows: [],
-  fundamentalLoading: false,
-  fundamentalError: ""
+  kseiError: ""
 };
 
 // ============================================================
-// FUNDAMENTAL DATA LOADER (dari sheet fundamental_data)
+// KSEI DATA LOADER
 // ============================================================
-async function loadFundamentalData(){
+async function loadKseiData(){
   if(!state.connection) return;
-  state.fundamentalLoading = true;
-  state.fundamentalError = "";
+  state.kseiLoading = true;
+  state.kseiError = "";
   try {
-    const res = await fetch(state.connection.url, {
+    const res = await fetch(state.connection.url + "?sheet=ksei_ownership", {
       headers: { Authorization: `Bearer ${state.connection.token}` }
     });
-    if(!res.ok) throw new Error(`API error ${res.status}`);
+    if(!res.ok) throw new Error(`KSEI load error ${res.status}`);
     const json = await res.json();
     const sheet = json.values || [];
-    if(sheet.length < 2) throw new Error("No data in fundamental_data sheet");
-    
-    const header = sheet[0].map(h => h.toLowerCase().trim());
-    state.fundamentalRows = sheet.slice(1).map(row => {
+    const header = (sheet[0] || []).map(h => h.toLowerCase());
+    state.kseiRows = sheet.slice(1).map(row => {
       const obj = {};
       header.forEach((h, i) => { obj[h] = row[i] || ""; });
       return obj;
     });
   } catch(e) {
-    state.fundamentalError = e.message;
+    state.kseiError = e.message;
   } finally {
-    state.fundamentalLoading = false;
-    render();
+    state.kseiLoading = false;
   }
-}
-
-function getFundamentalForTicker(ticker){
-  if(!ticker || state.fundamentalRows.length === 0) return null;
-  const found = state.fundamentalRows.find(r => (r.ticker || "").toUpperCase() === ticker.toUpperCase());
-  return found || null;
 }
 
 // ============================================================
@@ -166,7 +150,6 @@ async function connect(){
     
     await loadBrokerData();
     await loadKseiData();
-    await loadFundamentalData();
     
     state.showConnect = false;
   } catch(e) {
@@ -202,30 +185,6 @@ async function loadBrokerData(){
   }
 }
 
-async function loadKseiData(){
-  if(!state.connection) return;
-  state.kseiLoading = true;
-  state.kseiError = "";
-  try {
-    const res = await fetch(state.connection.url + "?sheet=ksei_ownership", {
-      headers: { Authorization: `Bearer ${state.connection.token}` }
-    });
-    if(!res.ok) throw new Error(`KSEI load error ${res.status}`);
-    const json = await res.json();
-    const sheet = json.values || [];
-    const header = (sheet[0] || []).map(h => h.toLowerCase());
-    state.kseiRows = sheet.slice(1).map(row => {
-      const obj = {};
-      header.forEach((h, i) => { obj[h] = row[i] || ""; });
-      return obj;
-    });
-  } catch(e) {
-    state.kseiError = e.message;
-  } finally {
-    state.kseiLoading = false;
-  }
-}
-
 // ============================================================
 // RENDER
 // ============================================================
@@ -238,7 +197,6 @@ function render(){
         <div class="sidebar">
           ${renderTickerSelector()}
           ${renderSidCard()}
-          ${renderFundamentalCard()}
         </div>
       </div>
     </div>
@@ -268,7 +226,7 @@ function renderTickerSelector(){
   ).join("");
   
   return `
-    <div class="card">
+    <div class="card" style="padding: 16px; margin-bottom: 14px;">
       <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase; color: var(--muted); margin-bottom: 9px;">Pilih Saham</div>
       <select id="tickerSelect">${opts}</select>
     </div>
@@ -287,14 +245,14 @@ function renderSidCard(){
   if(data.length === 0) return "";
   
   let html = `
-    <div class="card" style="min-width: 220px;">
-      <div class="card-title">Kepemilikan Saham (SID)</div>
+    <div class="card" style="padding: 16px;">
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase; color: var(--muted); margin-bottom: 12px;">Kepemilikan Saham (SID)</div>
   `;
   
-  data.forEach(row => {
+  data.forEach((row, idx) => {
     const d = row.date ? new Date(row.date).toLocaleDateString('id-ID', {month: 'short', day: 'numeric'}) : "";
     const curr = parseInt(row.local_individual) || 0;
-    const prev = data[data.indexOf(row) + 1];
+    const prev = data[idx + 1];
     const prevVal = prev ? parseInt(prev.local_individual) || 0 : curr;
     const delta = curr - prevVal;
     const dir = delta > 0 ? "+" : delta < 0 ? "−" : "→";
@@ -311,50 +269,6 @@ function renderSidCard(){
   
   html += `</div>`;
   return html;
-}
-
-function renderFundamentalCard(){
-  if(!state.ticker) return "";
-  
-  const fund = getFundamentalForTicker(state.ticker);
-  if(!fund) return `
-    <div class="card" style="min-width: 220px;">
-      <div class="card-title">Fundamental Data</div>
-      <div style="font-size: 11px; color: var(--muted);">Data tidak tersedia</div>
-    </div>
-  `;
-  
-  const per = parseFloat(fund.per) || 0;
-  const pbv = parseFloat(fund.pbv) || 0;
-  const roe = parseFloat(fund.roe) || 0;
-  const der = parseFloat(fund.der) || 0;
-  const mktcap = fund.market_cap ? parseInt(fund.market_cap) : 0;
-  
-  return `
-    <div class="card" style="min-width: 220px;">
-      <div class="card-title">Fundamental Data</div>
-      <div class="metric-row">
-        <span class="metric-label">PER</span>
-        <span class="metric-value">${per.toFixed(2)}</span>
-      </div>
-      <div class="metric-row">
-        <span class="metric-label">PBV</span>
-        <span class="metric-value">${pbv.toFixed(2)}</span>
-      </div>
-      <div class="metric-row">
-        <span class="metric-label">ROE %</span>
-        <span class="metric-value">${roe.toFixed(2)}</span>
-      </div>
-      <div class="metric-row">
-        <span class="metric-label">DER</span>
-        <span class="metric-value">${der.toFixed(2)}</span>
-      </div>
-      <div class="metric-row" style="margin-bottom: 0;">
-        <span class="metric-label">Mkt Cap</span>
-        <span class="metric-value" style="font-size: 11px;">${(mktcap/1e12).toFixed(2)}T</span>
-      </div>
-    </div>
-  `;
 }
 
 function renderMain(){
@@ -461,19 +375,17 @@ function renderUploadModal(){
 // ============================================================
 if(state.connection) {
   loadBrokerData().then(() => {
-    loadKseiData();
-    loadFundamentalData();
+    loadKseiData().then(() => render());
   });
 } else {
   render();
 }
 
-// Auto-sync setiap 2 menit kalau sudah connect
+// Auto-sync setiap 2 menit
 setInterval(() => {
   if(state.connection && !state.syncing) {
     loadBrokerData().then(() => {
-      loadKseiData();
-      loadFundamentalData();
+      loadKseiData().then(() => render());
     });
   }
 }, 120000);
