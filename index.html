@@ -102,6 +102,10 @@ let state = {
   kseiRows: [],
   kseiLoading: false,
   kseiError: "",
+  // --- data fundamental (PER, PBV, ROE, DER, market cap) ---
+  fundamentalRows: [],
+  fundamentalLoading: false,
+  fundamentalError: "",
 };
 
 function saveRows(rows){
@@ -252,6 +256,81 @@ function renderSidCard(activeTicker){
     ${state.kseiLoading ? `<div style="color:var(--faint);font-size:13px;padding:16px 0">Memuat data SID...</div>` :
       state.kseiError ? `<div style="color:var(--neg);font-size:13px;padding:16px 0">${esc(state.kseiError)}</div>` :
       monthList.length ? renderMonthList(monthList) : `<div style="color:var(--faint);font-size:13px;padding:16px 0">Belum ada data SID untuk ${esc(activeTicker || "saham ini")}.</div>`}
+  </div>`;
+}
+
+// ============================================================
+// DATA FUNDAMENTAL (PER, PBV, ROE, DER, MARKET CAP dari sheet)
+// ============================================================
+async function loadFundamentalData(){
+  if(!state.connection) return;
+  state.fundamentalLoading = true; state.fundamentalError = ""; render();
+  try{
+    const c = state.connection;
+    const sep = c.url.includes("?") ? "&" : "?";
+    const res = await fetch(`${c.url}${sep}token=${encodeURIComponent(c.token)}&sheet=fundamental_data`);
+    const json = await res.json();
+    if(json.error){ state.fundamentalError = json.error; }
+    else {
+      state.fundamentalRows = (json.data||[]).map(r => ({
+        date: r.date,
+        ticker: r.ticker,
+        market_cap: Number(r.market_cap),
+        per: Number(r.per),
+        pbv: Number(r.pbv),
+        roe: Number(r.roe),
+        der: Number(r.der),
+      })).filter(r => r.ticker);
+    }
+  } catch(e){
+    state.fundamentalError = "Gagal mengambil data fundamental.";
+  }
+  state.fundamentalLoading = false;
+  render();
+}
+
+function getFundamentalForTicker(ticker){
+  if(!ticker || !state.fundamentalRows.length) return null;
+  // ambil baris paling baru untuk ticker ini
+  const rows = state.fundamentalRows.filter(r => r.ticker === ticker);
+  if(!rows.length) return null;
+  rows.sort((a,b) => new Date(b.date) - new Date(a.date));
+  return rows[0];
+}
+
+function renderFundamentalCard(activeTicker){
+  if(!state.connection){
+    return "";
+  }
+  const data = getFundamentalForTicker(activeTicker);
+  return `
+  <div class="card" style="padding:20px;margin-bottom:20px">
+    <div class="mono" style="font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:1px;margin-bottom:14px">Fundamental Data</div>
+    ${state.fundamentalLoading ? `<div style="color:var(--faint);font-size:13px;padding:8px 0">Memuat...</div>` :
+      state.fundamentalError ? `<div style="color:var(--neg);font-size:13px;padding:8px 0">${esc(state.fundamentalError)}</div>` :
+      !data ? `<div style="color:var(--faint);font-size:13px;padding:8px 0">Data tidak tersedia untuk ${esc(activeTicker || "saham ini")}.</div>` :
+      `
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px">
+          <span style="color:var(--muted)">PER</span>
+          <span class="mono" style="font-weight:600">${data.per.toFixed(2)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px">
+          <span style="color:var(--muted)">PBV</span>
+          <span class="mono" style="font-weight:600">${data.pbv.toFixed(2)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px">
+          <span style="color:var(--muted)">ROE %</span>
+          <span class="mono" style="font-weight:600">${data.roe.toFixed(2)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px">
+          <span style="color:var(--muted)">DER</span>
+          <span class="mono" style="font-weight:600">${data.der.toFixed(2)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:8px 0;font-size:12.5px">
+          <span style="color:var(--muted)">Mkt Cap</span>
+          <span class="mono" style="font-weight:600">${(data.market_cap/1e12).toFixed(2)}T</span>
+        </div>
+      `}
   </div>`;
 }
 
@@ -415,6 +494,7 @@ async function doTestAndSaveConnection(){
     await testAndSaveConnection(url, token);
     closeConnectModal();
     loadKseiData();
+    loadFundamentalData();
   } catch(e){
     errEl.textContent = e.message || "Gagal menghubungi URL itu. Cek lagi URL-nya benar dan sudah di-deploy.";
     errEl.style.display = "block";
@@ -582,6 +662,7 @@ function render(){
 
     <div class="sidebar">
       ${renderSidCard(active)}
+      ${renderFundamentalCard(active)}
     </div>
 
   </div>
@@ -591,7 +672,7 @@ function render(){
 
 // jalankan pertama kali, lalu auto-sync kalau sudah pernah connect
 render();
-if(state.connection){ syncNow(); loadKseiData(); }
+if(state.connection){ syncNow(); loadKseiData(); loadFundamentalData(); }
 </script>
 </body>
 </html>
