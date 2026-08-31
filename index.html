@@ -367,6 +367,94 @@ function sparklineSVG(values, color, w=100, h=32){
 }
 
 // ============================================================
+// RENDER: BROKER SUMMARY HARI TERAKHIR (BUY vs SELL side-by-side)
+// ============================================================
+function fmtVal(n){
+  const a = Math.abs(n);
+  if (a >= 1e12) return (n/1e12).toFixed(1) + "T";
+  if (a >= 1e9) return (n/1e9).toFixed(1) + "B";
+  if (a >= 1e6) return (n/1e6).toFixed(1) + "M";
+  if (a >= 1e3) return (n/1e3).toFixed(1) + "K";
+  return String(Math.round(n));
+}
+function fmtLot(n){
+  return Math.round(Math.abs(n)).toLocaleString('id-ID');
+}
+
+function renderBrokerSummaryToday(scoped, days){
+  if (!days.length) return "";
+  const lastDay = days[days.length - 1];
+  const todayRows = scoped.filter(r => r.date === lastDay);
+  if (todayRows.length === 0) return "";
+
+  // Agregat per broker per side untuk hari itu
+  const buyMap = {}, sellMap = {};
+  todayRows.forEach(r => {
+    const code = r.broker_code;
+    const lot = Number(r.lot) || 0;
+    const value = Number(r.value) || 0;
+    const isBuy = String(r.side).toUpperCase() === "BUY";
+    const target = isBuy ? buyMap : sellMap;
+    if (!target[code]) target[code] = { code, name: r.broker_name || code, lot: 0, value: 0, avgSum: 0, avgN: 0 };
+    target[code].lot += lot;
+    target[code].value += value;
+    const a = Number(r.avg);
+    if (!isNaN(a) && a > 0) { target[code].avgSum += a; target[code].avgN += 1; }
+  });
+
+  const buyTop = Object.values(buyMap).map(b => ({...b, avg: b.avgN ? b.avgSum/b.avgN : 0})).sort((a,b) => b.value - a.value).slice(0, 10);
+  const sellTop = Object.values(sellMap).map(b => ({...b, avg: b.avgN ? b.avgSum/b.avgN : 0})).sort((a,b) => b.value - a.value).slice(0, 10);
+
+  const rowStyle = "display:grid;grid-template-columns:38px 60px 60px 60px;gap:6px;padding:7px 10px;border-bottom:1px solid var(--border);font-size:11.5px;align-items:center";
+  const headStyle = "display:grid;grid-template-columns:38px 60px 60px 60px;gap:6px;padding:8px 10px;border-bottom:1px solid var(--border);font-size:9.5px;letter-spacing:1px;color:var(--faint);text-transform:uppercase";
+
+  const buyRowsHtml = buyTop.map(b => `
+    <div style="${rowStyle}">
+      <div class="mono" style="font-weight:600;color:var(--pos)">${esc(b.code)}</div>
+      <div class="mono" style="text-align:right;color:var(--text)">${fmtVal(b.value)}</div>
+      <div class="mono" style="text-align:right;color:var(--muted)">${fmtLot(b.lot)}</div>
+      <div class="mono" style="text-align:right;color:var(--muted)">${b.avg ? Math.round(b.avg).toLocaleString('id-ID') : '-'}</div>
+    </div>
+  `).join("");
+
+  const sellRowsHtml = sellTop.map(b => `
+    <div style="${rowStyle}">
+      <div class="mono" style="font-weight:600;color:var(--neg)">${esc(b.code)}</div>
+      <div class="mono" style="text-align:right;color:var(--text)">${fmtVal(b.value)}</div>
+      <div class="mono" style="text-align:right;color:var(--muted)">${fmtLot(b.lot)}</div>
+      <div class="mono" style="text-align:right;color:var(--muted)">${b.avg ? Math.round(b.avg).toLocaleString('id-ID') : '-'}</div>
+    </div>
+  `).join("");
+
+  return `
+    <div style="margin-top:24px">
+      <div class="mono" style="font-size:10.5px;letter-spacing:1.5px;color:var(--faint);text-transform:uppercase;margin-bottom:10px">
+        Broker Summary &middot; ${esc(lastDay)}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="card">
+          <div style="${headStyle}">
+            <div style="color:var(--pos)">Buy</div>
+            <div style="text-align:right">B.Val</div>
+            <div style="text-align:right">B.Lot</div>
+            <div style="text-align:right">B.Avg</div>
+          </div>
+          ${buyRowsHtml || `<div style="padding:14px;text-align:center;color:var(--faint);font-size:11px">Tidak ada data buy</div>`}
+        </div>
+        <div class="card">
+          <div style="${headStyle}">
+            <div style="color:var(--neg)">Sell</div>
+            <div style="text-align:right">S.Val</div>
+            <div style="text-align:right">S.Lot</div>
+            <div style="text-align:right">S.Avg</div>
+          </div>
+          ${sellRowsHtml || `<div style="padding:14px;text-align:center;color:var(--faint);font-size:11px">Tidak ada data sell</div>`}
+        </div>
+      </div>
+    </div>`;
+}
+
+// ============================================================
 // RENDER: VARIAN LEDGER
 // ============================================================
 function renderLedger(pos){
@@ -654,6 +742,8 @@ function render(){
       </div>
 
       ${state.varian==='ledger' ? renderLedger(positions) : state.varian==='matriks' ? renderMatriks(positions, days) : renderKartu(positions, days)}
+
+      ${state.varian==='ledger' ? renderBrokerSummaryToday(scoped, days) : ''}
 
       <div style="margin-top:30px;padding-top:18px;border-top:1px solid var(--border);font-size:11.5px;color:var(--faint);line-height:1.65">
         Angka sisa barang dihitung dari selisih beli dan jual yang tercatat di data yang kamu masukkan &mdash;
