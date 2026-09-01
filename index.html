@@ -98,6 +98,8 @@ let state = {
   lastSync: localStorage.getItem("bdm_lastsync") || null,
   showUpload: false,
   showConnect: false,
+  showChart: false,
+  chartExpanded: false,
   // --- data SID (kepemilikan individual lokal, dari KSEI) ---
   kseiRows: [],
   kseiLoading: false,
@@ -609,6 +611,9 @@ function openUploadModal(){ state.showUpload = true; render(); }
 function closeUploadModal(){ state.showUpload = false; render(); }
 function openConnectModal(){ state.showConnect = true; render(); }
 function closeConnectModal(){ state.showConnect = false; render(); }
+function openChartModal(){ state.showChart = true; state.chartExpanded = false; render(); }
+function closeChartModal(){ state.showChart = false; state.chartExpanded = false; render(); }
+function toggleChartExpanded(){ state.chartExpanded = !state.chartExpanded; render(); }
 
 function doImportFromTextarea(){
   const text = document.getElementById("upload-textarea").value.trim();
@@ -646,6 +651,9 @@ async function doTestAndSaveConnection(){
 
 function modalsHtml(){
   let html = "";
+  if(state.showChart){
+    html += renderChartModal();
+  }
   if(state.showUpload){
     html += `
     <div class="modal-overlay" onclick="closeUploadModal()">
@@ -763,6 +771,7 @@ function render(){
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           ${syncStatusHtml}
           <a href="backtest.html" class="btn" style="text-decoration:none">Backtest</a>
+          <button class="btn" onclick="openChartModal()">Chart</button>
           <button class="btn" onclick="openConnectModal()">${state.connection ? "Ubah koneksi" : "Sambungkan otomatis"}</button>
           <button class="btn" onclick="if(confirm('Hapus semua data tersimpan?')){ saveRows([]); render(); }">Hapus semua</button>
           <button class="btn btn-gold" onclick="openUploadModal()">Tempel manual</button>
@@ -819,6 +828,74 @@ function render(){
 // jalankan pertama kali, lalu auto-sync kalau sudah pernah connect
 render();
 if(state.connection){ syncNow(); loadKseiData(); loadFundamentalData(); }
+
+function renderChartModal(){
+  const ticker = state.ticker || (state.rows[0] && state.rows[0].ticker) || "BRPT";
+  const expanded = state.chartExpanded;
+  const width = expanded ? "95vw" : "min(880px, 92vw)";
+  const height = expanded ? "88vh" : "min(560px, 78vh)";
+  return `
+  <div onclick="if(event.target===this) closeChartModal()"
+       style="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px">
+    <div style="background:var(--panel);border:1px solid var(--border);border-radius:6px;width:${width};height:${height};display:flex;flex-direction:column;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border)">
+        <div class="mono" style="font-size:11px;letter-spacing:1.5px;color:var(--faint);text-transform:uppercase">CHART &middot; ${esc(ticker)}${expanded ? ' &middot; expanded' : ''}</div>
+        <div style="display:flex;gap:6px">
+          <button class="btn" onclick="toggleChartExpanded()" style="padding:5px 10px;font-size:11px">${expanded ? 'Kecilkan' : 'Perbesar'}</button>
+          <button class="btn" onclick="closeChartModal()" style="padding:5px 10px;font-size:11px">Tutup</button>
+        </div>
+      </div>
+      <div style="flex:1;position:relative;background:#131722">
+        <div id="tv_chart_container" style="position:absolute;inset:0"></div>
+      </div>
+    </div>
+  </div>`;
+}
+
+let _tvLoaded = false;
+function initTradingViewChart(){
+  if (!state.showChart) return;
+  const container = document.getElementById("tv_chart_container");
+  if (!container) return;
+  container.innerHTML = "";
+  const ticker = state.ticker || (state.rows[0] && state.rows[0].ticker) || "BRPT";
+
+  function buatWidget(){
+    if (!window.TradingView) { setTimeout(buatWidget, 100); return; }
+    new TradingView.widget({
+      "container_id": "tv_chart_container",
+      "symbol": "IDX:" + ticker,
+      "interval": "D",
+      "theme": "dark",
+      "style": "1",
+      "locale": "id",
+      "toolbar_bg": "#1e1e2e",
+      "enable_publishing": false,
+      "hide_side_toolbar": false,
+      "withdateranges": true,
+      "allow_symbol_change": true,
+      "autosize": true,
+      "studies": []
+    });
+  }
+
+  if (_tvLoaded) {
+    buatWidget();
+  } else {
+    const script = document.createElement("script");
+    script.src = "https://s3.tradingview.com/tv.js";
+    script.onload = function(){ _tvLoaded = true; buatWidget(); };
+    document.head.appendChild(script);
+  }
+}
+
+// hook ke render supaya chart di-init setelah modal muncul
+const _origRender = render;
+render = function(){
+  _origRender();
+  if (state.showChart) setTimeout(initTradingViewChart, 50);
+};
+
 </script>
 </body>
 </html>
