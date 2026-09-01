@@ -1,0 +1,25 @@
+{
+  "name": "BDM Index",
+  "short_name": "BDM Index",
+  "description": "Panel Bacaan Bandar untuk saham IDX",
+  "start_url": "/bandarmology-dashboard/index.html",
+  "scope": "/bandarmology-dashboard/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0B0F1E",
+  "theme_color": "#0B0F1E",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
