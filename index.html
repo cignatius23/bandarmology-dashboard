@@ -2,7 +2,15 @@
 <html lang="id">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0B0F1E">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BDM Index">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
 <title>Panel Bacaan Bandar</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
@@ -59,6 +67,80 @@
   td, th { padding: 8px 12px; }
   ::placeholder { color: var(--faint); }
   a { color: var(--gold); }
+
+  /* ============================================================
+     OPTIMASI MOBILE (< 768px)
+     ============================================================ */
+  @media (max-width: 767px) {
+    body { font-size: 14px; }
+    .wrap { padding: 12px !important; }
+    .card { padding: 12px !important; }
+
+    /* Toolbar atas: stack vertikal di HP */
+    .toolbar-mobile { flex-direction: column; align-items: stretch !important; gap: 8px !important; }
+    .toolbar-mobile > * { width: 100%; }
+    .toolbar-mobile .btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
+    .toolbar-mobile .btn-row .btn { flex: 1 1 auto; min-width: 0; font-size: 12px; padding: 8px 10px; }
+
+    /* Judul saham lebih kecil di HP */
+    h1.display { font-size: 20px !important; }
+
+    /* 3 kartu ringkasan: full width, stack */
+    .kartu-ringkasan { flex-direction: column !important; }
+    .kartu-ringkasan > * { flex: 1 1 100% !important; }
+
+    /* Tab (Ledger/Matriks/Kartu): scroll horizontal kalau kepanjangan */
+    .tab-bar { overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
+    .tab-bar .btn { display: inline-block; }
+
+    /* Broker Summary side-by-side: stack vertikal di HP */
+    .broker-summary-grid { grid-template-columns: 1fr !important; }
+
+    /* Ledger row: kurangi padding kolom */
+    .ledger-row { grid-template-columns: 36px 1fr 60px 60px 70px !important; gap: 6px !important; font-size: 11px !important; }
+    .ledger-row .broker-name { font-size: 11px !important; }
+
+    /* Sidebar (SID + Fundamental): full width, di bawah main */
+    .sidebar-mobile { position: static !important; margin-top: 16px; }
+
+    /* Modal fullscreen di HP */
+    .modal-box { max-width: 100% !important; max-height: 100% !important; border-radius: 0 !important; }
+    .modal-overlay { padding: 0 !important; }
+
+    /* Hilangkan hover effect (sentuhan) */
+    .btn:hover { border-color: var(--border) !important; }
+
+    /* Safe area untuk iPhone dengan notch */
+    body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+  }
+
+  /* PWA Install Hint (cuma tampil di iPhone Safari belum-install) */
+  .pwa-hint {
+    position: fixed;
+    bottom: 16px;
+    left: 16px;
+    right: 16px;
+    background: var(--panel);
+    border: 1px solid var(--gold);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 12.5px;
+    color: var(--text);
+    z-index: 500;
+    display: none;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  }
+  .pwa-hint.show { display: flex; align-items: center; gap: 10px; }
+  .pwa-hint-close {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 18px;
+    cursor: pointer;
+    padding: 0 4px;
+  }
+
 </style>
 </head>
 <body>
@@ -720,7 +802,7 @@ function render(){
   if(state.rows.length === 0){
     root.innerHTML = `
     <div class="wrap">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:22px">
+      <div class="toolbar-mobile" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:22px">
         <div>
           <div class="mono" style="font-size:10.5px;letter-spacing:1.5px;color:var(--faint);text-transform:uppercase;margin-bottom:5px">Posisi barang broker</div>
           <h1 class="display" style="font-size:27px;font-weight:700;margin:0">Belum ada saham</h1>
@@ -774,7 +856,7 @@ function render(){
 
       ${state.syncError ? `<div style="margin-bottom:16px;padding:10px 14px;border-radius:3px;background:#331E20;color:var(--neg);font-size:12.5px">${esc(state.syncError)}</div>` : ""}
 
-      <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+      <div class="kartu-ringkasan" style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">
         <div class="card" style="flex:1 1 200px;border-left:3px solid ${bandarNet>=0?'var(--pos)':'var(--neg)'};padding:14px 16px">
           <div class="mono" style="font-size:10px;letter-spacing:1px;color:var(--faint);text-transform:uppercase">Barang di tangan bandar</div>
           <div class="display" style="font-size:25px;font-weight:700;color:${bandarNet>=0?'var(--pos)':'var(--neg)'};margin-top:3px">${lotFmt(bandarNet)} <span style="font-size:12px;font-weight:500;color:var(--faint)">lot</span></div>
@@ -824,6 +906,39 @@ render();
 if(state.connection){ syncNow(); loadKseiData(); loadFundamentalData(); }
 
 
+
+
+
+// ============================================================
+// PWA: SERVICE WORKER + INSTALL HINT untuk iPhone
+// ============================================================
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+
+// Hint install untuk iPhone Safari yang belum-install
+(function tampilkanHintIPhone(){
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  const isStandalone = ('standalone' in navigator && navigator.standalone) ||
+                       window.matchMedia('(display-mode: standalone)').matches;
+  const sudahDitutup = localStorage.getItem('bdm-pwa-hint-closed') === '1';
+
+  if (!isIOS || isStandalone || sudahDitutup) return;
+
+  window.addEventListener('load', () => {
+    setTimeout(() => {
+      const hint = document.createElement('div');
+      hint.className = 'pwa-hint show';
+      hint.innerHTML = `
+        <span>Install BDM Index: tap <b>Share</b> ↑ lalu pilih <b>Add to Home Screen</b></span>
+        <button class="pwa-hint-close" onclick="this.parentElement.remove(); localStorage.setItem('bdm-pwa-hint-closed','1')">&times;</button>
+      `;
+      document.body.appendChild(hint);
+    }, 2000);
+  });
+})();
 
 </script>
 </body>
