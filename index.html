@@ -98,8 +98,6 @@ let state = {
   lastSync: localStorage.getItem("bdm_lastsync") || null,
   showUpload: false,
   showConnect: false,
-  showChart: false,
-  chartExpanded: false,
   // --- data SID (kepemilikan individual lokal, dari KSEI) ---
   kseiRows: [],
   kseiLoading: false,
@@ -611,9 +609,6 @@ function openUploadModal(){ state.showUpload = true; render(); }
 function closeUploadModal(){ state.showUpload = false; render(); }
 function openConnectModal(){ state.showConnect = true; render(); }
 function closeConnectModal(){ state.showConnect = false; render(); }
-function openChartModal(){ state.showChart = true; state.chartExpanded = false; render(); }
-function closeChartModal(){ state.showChart = false; state.chartExpanded = false; render(); }
-function toggleChartExpanded(){ state.chartExpanded = !state.chartExpanded; render(); }
 
 function doImportFromTextarea(){
   const text = document.getElementById("upload-textarea").value.trim();
@@ -651,9 +646,6 @@ async function doTestAndSaveConnection(){
 
 function modalsHtml(){
   let html = "";
-  if(state.showChart){
-    html += renderChartModal();
-  }
   if(state.showUpload){
     html += `
     <div class="modal-overlay" onclick="closeUploadModal()">
@@ -771,7 +763,9 @@ function render(){
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           ${syncStatusHtml}
           <a href="backtest.html" class="btn" style="text-decoration:none">Backtest</a>
-          <button class="btn" onclick="openChartModal()">Chart</button>
+          <a href="https://www.tradingview.com/chart/?symbol=IDX%3A${encodeURIComponent(active || 'BRPT')}"
+             target="_blank" rel="noopener"
+             class="btn" style="text-decoration:none">Chart &#8599;</a>
           <button class="btn" onclick="openConnectModal()">${state.connection ? "Ubah koneksi" : "Sambungkan otomatis"}</button>
           <button class="btn" onclick="if(confirm('Hapus semua data tersimpan?')){ saveRows([]); render(); }">Hapus semua</button>
           <button class="btn btn-gold" onclick="openUploadModal()">Tempel manual</button>
@@ -829,39 +823,6 @@ function render(){
 render();
 if(state.connection){ syncNow(); loadKseiData(); loadFundamentalData(); }
 
-function renderChartModal(){
-  const ticker = state.ticker || (state.rows[0] && state.rows[0].ticker) || "BRPT";
-  const expanded = state.chartExpanded;
-  const width = expanded ? "95vw" : "min(880px, 92vw)";
-  const height = expanded ? "88vh" : "min(560px, 78vh)";
-  const url = `https://www.tradingview.com/chart/?symbol=IDX%3A${encodeURIComponent(ticker)}`;
-  const urlBaru = `https://www.tradingview.com/chart/?symbol=IDX%3A${encodeURIComponent(ticker)}`;
-  return `
-  <div onclick="if(event.target===this) closeChartModal()"
-       style="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px">
-    <div style="background:var(--panel);border:1px solid var(--border);border-radius:6px;width:${width};height:${height};display:flex;flex-direction:column;overflow:hidden">
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border)">
-        <div class="mono" style="font-size:11px;letter-spacing:1.5px;color:var(--faint);text-transform:uppercase">CHART &middot; ${esc(ticker)}${expanded ? ' &middot; expanded' : ''}</div>
-        <div style="display:flex;gap:6px">
-          <a href="${urlBaru}" target="_blank" rel="noopener" class="btn" style="padding:5px 10px;font-size:11px;text-decoration:none">Buka di tab baru</a>
-          <button class="btn" onclick="toggleChartExpanded()" style="padding:5px 10px;font-size:11px">${expanded ? 'Kecilkan' : 'Perbesar'}</button>
-          <button class="btn" onclick="closeChartModal()" style="padding:5px 10px;font-size:11px">Tutup</button>
-        </div>
-      </div>
-      <div style="flex:1;position:relative;background:#131722">
-        <iframe id="tv_chart_iframe" src="${url}"
-                style="position:absolute;inset:0;width:100%;height:100%;border:0;background:#131722"
-                allow="clipboard-read; clipboard-write; fullscreen"
-                onerror="document.getElementById('tv_chart_fallback').style.display='flex'"></iframe>
-        <div id="tv_chart_fallback"
-             style="display:none;position:absolute;inset:0;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;color:var(--muted);font-size:13px">
-          <div style="margin-bottom:12px">TradingView memblokir tampilan chart di dalam dashboard ini.</div>
-          <a href="${urlBaru}" target="_blank" rel="noopener" class="btn btn-gold" style="text-decoration:none">Buka di tab baru</a>
-        </div>
-      </div>
-    </div>
-  </div>`;
-}
 
 
 </script>
