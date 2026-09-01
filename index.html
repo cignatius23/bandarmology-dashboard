@@ -834,6 +834,8 @@ function renderChartModal(){
   const expanded = state.chartExpanded;
   const width = expanded ? "95vw" : "min(880px, 92vw)";
   const height = expanded ? "88vh" : "min(560px, 78vh)";
+  const url = `https://www.tradingview.com/chart/?symbol=IDX%3A${encodeURIComponent(ticker)}`;
+  const urlBaru = `https://www.tradingview.com/chart/?symbol=IDX%3A${encodeURIComponent(ticker)}`;
   return `
   <div onclick="if(event.target===this) closeChartModal()"
        style="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px">
@@ -841,60 +843,26 @@ function renderChartModal(){
       <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border)">
         <div class="mono" style="font-size:11px;letter-spacing:1.5px;color:var(--faint);text-transform:uppercase">CHART &middot; ${esc(ticker)}${expanded ? ' &middot; expanded' : ''}</div>
         <div style="display:flex;gap:6px">
+          <a href="${urlBaru}" target="_blank" rel="noopener" class="btn" style="padding:5px 10px;font-size:11px;text-decoration:none">Buka di tab baru</a>
           <button class="btn" onclick="toggleChartExpanded()" style="padding:5px 10px;font-size:11px">${expanded ? 'Kecilkan' : 'Perbesar'}</button>
           <button class="btn" onclick="closeChartModal()" style="padding:5px 10px;font-size:11px">Tutup</button>
         </div>
       </div>
       <div style="flex:1;position:relative;background:#131722">
-        <div id="tv_chart_container" style="position:absolute;inset:0"></div>
+        <iframe id="tv_chart_iframe" src="${url}"
+                style="position:absolute;inset:0;width:100%;height:100%;border:0;background:#131722"
+                allow="clipboard-read; clipboard-write; fullscreen"
+                onerror="document.getElementById('tv_chart_fallback').style.display='flex'"></iframe>
+        <div id="tv_chart_fallback"
+             style="display:none;position:absolute;inset:0;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;color:var(--muted);font-size:13px">
+          <div style="margin-bottom:12px">TradingView memblokir tampilan chart di dalam dashboard ini.</div>
+          <a href="${urlBaru}" target="_blank" rel="noopener" class="btn btn-gold" style="text-decoration:none">Buka di tab baru</a>
+        </div>
       </div>
     </div>
   </div>`;
 }
 
-let _tvLoaded = false;
-function initTradingViewChart(){
-  if (!state.showChart) return;
-  const container = document.getElementById("tv_chart_container");
-  if (!container) return;
-  container.innerHTML = "";
-  const ticker = state.ticker || (state.rows[0] && state.rows[0].ticker) || "BRPT";
-
-  function buatWidget(){
-    if (!window.TradingView) { setTimeout(buatWidget, 100); return; }
-    new TradingView.widget({
-      "container_id": "tv_chart_container",
-      "symbol": "IDX:" + ticker,
-      "interval": "D",
-      "theme": "dark",
-      "style": "1",
-      "locale": "id",
-      "toolbar_bg": "#1e1e2e",
-      "enable_publishing": false,
-      "hide_side_toolbar": false,
-      "withdateranges": true,
-      "allow_symbol_change": true,
-      "autosize": true,
-      "studies": []
-    });
-  }
-
-  if (_tvLoaded) {
-    buatWidget();
-  } else {
-    const script = document.createElement("script");
-    script.src = "https://s3.tradingview.com/tv.js";
-    script.onload = function(){ _tvLoaded = true; buatWidget(); };
-    document.head.appendChild(script);
-  }
-}
-
-// hook ke render supaya chart di-init setelah modal muncul
-const _origRender = render;
-render = function(){
-  _origRender();
-  if (state.showChart) setTimeout(initTradingViewChart, 50);
-};
 
 </script>
 </body>
