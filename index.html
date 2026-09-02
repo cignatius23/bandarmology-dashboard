@@ -141,6 +141,55 @@
     padding: 0 4px;
   }
 
+  /* ============================================================
+     STYLE KHUSUS UNTUK TABEL IDX (baru)
+     ============================================================ */
+  #idx-table th { background: #1a2540; padding: 8px 12px; text-align: left; cursor: pointer; font-size: 11px; letter-spacing: 0.5px; color: var(--muted); }
+  #idx-table th:hover { background: #253050; }
+  #idx-table td { padding: 6px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  #idx-table tr:hover { background: #1a2540; }
+  .idx-lf-badge {
+    display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;
+  }
+  .idx-lf-L { background: #1a3a5c; color: #60a5fa; }
+  .idx-lf-F { background: #4a1a3a; color: #f472b6; }
+  .idx-lf-unknown { background: #2a2a3a; color: #94a3b8; }
+  .idx-pct-high { color: #ef4444; }
+  .idx-pct-mid { color: #f59e0b; }
+  .idx-pct-low { color: #3b82f6; }
+
+  /* Section IDX - agar menyatu dengan tema */
+  .idx-section {
+    margin-top: 40px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+  }
+  .idx-controls {
+    display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px;
+  }
+  .idx-controls input, .idx-controls select {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 20px;
+    color: var(--text); padding: 8px 14px; font-size: 13px; outline: none;
+  }
+  .idx-controls input { flex: 1; min-width: 150px; }
+  .idx-controls select { width: auto; min-width: 120px; }
+  .idx-controls button {
+    background: var(--gold); color: var(--bg); border: none; border-radius: 20px;
+    padding: 8px 18px; font-weight: 600; cursor: pointer; font-size: 13px;
+  }
+  .idx-stats {
+    font-size: 13px; color: var(--muted); margin-bottom: 12px;
+  }
+  .idx-stats span { color: var(--text); font-weight: 600; }
+  .idx-pagination {
+    display: flex; gap: 10px; margin-top: 14px; align-items: center;
+  }
+  .idx-pagination button {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); padding: 6px 14px; cursor: pointer;
+  }
+  .idx-pagination button:disabled { opacity: 0.4; cursor: default; }
+  .idx-pagination span { font-size: 14px; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -167,8 +216,7 @@ const SAMPLE = `date,ticker,broker_code,broker_name,side,lot,value,avg
 2026-08-20,MBSS,XL,Stockbit Sekuritas,SELL,700,198100000,2830`;
 
 // ============================================================
-// STATE (persist ke localStorage -- ini website beneran, jadi
-// localStorage aman dipakai, beda dengan artifact Claude)
+// STATE (persist ke localStorage)
 // ============================================================
 let state = {
   rows: JSON.parse(localStorage.getItem("bdm_rows") || "[]"),
@@ -192,7 +240,19 @@ let state = {
   brokerSummaryDate: null,
   // --- mode ledger: "akumulasi" (all-days net) atau "agresif" (hari terakhir saja) ---
   ledgerMode: "akumulasi",
+  // --- data IDX Shareholder (baru) ---
+  idxData: [],
+  idxFiltered: [],
+  idxPage: 0,
+  idxLoading: false,
+  idxError: "",
+  idxSortField: "PERCENTAGE",
+  idxSortAsc: false,
+  idxSearch: "",
+  idxFilterKode: "",
 };
+
+const IDX_PAGE_SIZE = 50;
 
 function saveRows(rows){
   state.rows = rows;
@@ -244,7 +304,7 @@ async function testAndSaveConnection(url, token){
 }
 
 // ============================================================
-// DATA SID / KEPEMILIKAN KSEI (untuk kartu di bagian atas halaman)
+// DATA SID / KEPEMILIKAN KSEI
 // ============================================================
 const BULAN_ID = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
 
@@ -324,7 +384,6 @@ function renderMonthList(items) {
   `).join("");
 }
 
-// Kartu SID -- ikut berubah sesuai ticker yang lagi aktif di dashboard
 function renderSidCard(activeTicker){
   if(!state.connection){
     return `
@@ -346,7 +405,7 @@ function renderSidCard(activeTicker){
 }
 
 // ============================================================
-// DATA FUNDAMENTAL (PER, PBV, ROE, DER, MARKET CAP dari sheet)
+// DATA FUNDAMENTAL
 // ============================================================
 async function loadFundamentalData(){
   if(!state.connection) return;
@@ -377,7 +436,6 @@ async function loadFundamentalData(){
 
 function getFundamentalForTicker(ticker){
   if(!ticker || !state.fundamentalRows.length) return null;
-  // ambil baris paling baru untuk ticker ini
   const rows = state.fundamentalRows.filter(r => r.ticker === ticker);
   if(!rows.length) return null;
   rows.sort((a,b) => new Date(b.date) - new Date(a.date));
@@ -385,9 +443,7 @@ function getFundamentalForTicker(ticker){
 }
 
 function renderFundamentalCard(activeTicker){
-  if(!state.connection){
-    return "";
-  }
+  if(!state.connection) return "";
   const data = getFundamentalForTicker(activeTicker);
   return `
   <div class="card" style="padding:20px;margin-bottom:20px">
@@ -421,6 +477,118 @@ function renderFundamentalCard(activeTicker){
 }
 
 // ============================================================
+// DATA IDX SHAREHOLDER (BARU)
+// ============================================================
+const IDX_API_URL = 'https://script.google.com/macros/s/ABCDE12345/exec'; // <-- GANTI INI
+
+async function loadIdxData(){
+  state.idxLoading = true; state.idxError = ""; render();
+  try {
+    const resp = await fetch(`${IDX_API_URL}?limit=9999`);
+    const json = await resp.json();
+    if (!json.success) throw new Error(json.error || "Gagal mengambil data IDX");
+    state.idxData = json.data || [];
+    // Isi dropdown filter kode
+    const kodeSet = new Set(state.idxData.map(d => d.SHARE_CODE).filter(Boolean));
+    const filterSelect = document.getElementById('idx-filter-kode');
+    if (filterSelect) {
+      filterSelect.innerHTML = '<option value="">Semua Saham</option>';
+      [...kodeSet].sort().forEach(k => {
+        const opt = document.createElement('option');
+        opt.value = k;
+        opt.textContent = k;
+        filterSelect.appendChild(opt);
+      });
+    }
+    applyIdxFilter();
+  } catch (err) {
+    state.idxError = err.message;
+    render();
+  }
+  state.idxLoading = false;
+  render();
+}
+
+function applyIdxFilter(){
+  const kata = state.idxSearch.toLowerCase().trim();
+  const kode = state.idxFilterKode;
+  state.idxFiltered = state.idxData.filter(d => {
+    if (kode && d.SHARE_CODE !== kode) return false;
+    if (kata) {
+      const cocok = (d.ISSUER_NAME || '').toLowerCase().includes(kata) ||
+                    (d.INVESTOR_NAME || '').toLowerCase().includes(kata) ||
+                    (d.SHARE_CODE || '').toLowerCase().includes(kata);
+      if (!cocok) return false;
+    }
+    return true;
+  });
+  // Sort
+  state.idxFiltered.sort((a, b) => {
+    let va = a[state.idxSortField] ?? '', vb = b[state.idxSortField] ?? '';
+    if (typeof va === 'string') va = va.toLowerCase();
+    if (typeof vb === 'string') vb = vb.toLowerCase();
+    if (va < vb) return state.idxSortAsc ? -1 : 1;
+    if (va > vb) return state.idxSortAsc ? 1 : -1;
+    return 0;
+  });
+  state.idxPage = 0;
+  renderIdxTable();
+  updateIdxPagination();
+}
+
+function renderIdxTable(){
+  const tbody = document.getElementById('idx-tbody');
+  if (!tbody) return;
+  const start = state.idxPage * IDX_PAGE_SIZE;
+  const pageData = state.idxFiltered.slice(start, start + IDX_PAGE_SIZE);
+  if (state.idxLoading) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--muted)">⏳ Memuat data IDX...</td></tr>';
+    return;
+  }
+  if (state.idxError) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--neg)">❌ ${esc(state.idxError)}</td></tr>`;
+    return;
+  }
+  if (pageData.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--muted)">Tidak ada data</td></tr>';
+    return;
+  }
+  tbody.innerHTML = pageData.map(d => {
+    const lfClass = d.LOCAL_FOREIGN === 'L' ? 'idx-lf-L' : d.LOCAL_FOREIGN === 'F' ? 'idx-lf-F' : 'idx-lf-unknown';
+    const pct = d.PERCENTAGE || 0;
+    const pctClass = pct > 10 ? 'idx-pct-high' : pct > 5 ? 'idx-pct-mid' : 'idx-pct-low';
+    return `
+      <tr>
+        <td style="font-weight:600;">${esc(d.SHARE_CODE || '-')}</td>
+        <td>${esc(d.ISSUER_NAME || '-')}</td>
+        <td style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(d.INVESTOR_NAME || '')}">${esc(d.INVESTOR_NAME || '-')}</td>
+        <td>${esc(d.INVESTOR_CLASSIFICATION || '-')}</td>
+        <td><span class="idx-lf-badge ${lfClass}">${esc(d.LOCAL_FOREIGN || '-')}</span></td>
+        <td style="text-align:right;font-family:monospace;">${d.TOTAL_HOLDING_SHARES ? Number(d.TOTAL_HOLDING_SHARES).toLocaleString('id-ID') : '-'}</td>
+        <td style="text-align:right;font-weight:600;class="${pctClass}">${d.PERCENTAGE ? d.PERCENTAGE.toFixed(2) + '%' : '-'}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function updateIdxPagination(){
+  const total = state.idxFiltered.length;
+  const totalPages = Math.ceil(total / IDX_PAGE_SIZE) || 1;
+  const pageInfo = document.getElementById('idx-page-info');
+  const prevBtn = document.getElementById('idx-prev');
+  const nextBtn = document.getElementById('idx-next');
+  const stats = document.getElementById('idx-stats-text');
+  if (pageInfo) pageInfo.textContent = `Halaman ${state.idxPage+1} dari ${totalPages}`;
+  if (prevBtn) prevBtn.disabled = state.idxPage === 0;
+  if (nextBtn) nextBtn.disabled = state.idxPage >= totalPages - 1;
+  if (stats) {
+    const uniqueCodes = new Set(state.idxData.map(d => d.SHARE_CODE).filter(Boolean));
+    const uniqueInvestors = new Set(state.idxData.map(d => d.INVESTOR_NAME).filter(Boolean));
+    stats.innerHTML = `Total data: <span>${state.idxData.length}</span> | Saham unik: <span>${uniqueCodes.size}</span> | Investor unik: <span>${uniqueInvestors.size}</span>`;
+  }
+}
+
+// ============================================================
 // KOMPUTASI POSISI
 // ============================================================
 function computePositions(scoped){
@@ -428,532 +596,4 @@ function computePositions(scoped){
   scoped.forEach(r => {
     const code = r.broker_code;
     if(!acc[code]) acc[code] = { code, name: r.broker_name || code, buy:0, sell:0, perDay:{}, avgSum:0, avgN:0 };
-    const lots = Number(r.lot) || 0;
-    const isBuy = String(r.side).toUpperCase() === "BUY";
-    if(isBuy) acc[code].buy += lots; else acc[code].sell += lots;
-    acc[code].perDay[r.date] = (acc[code].perDay[r.date] || 0) + (isBuy ? lots : -lots);
-    const a = Number(r.avg);
-    if(!isNaN(a) && a > 0){ acc[code].avgSum += a; acc[code].avgN += 1; }
-  });
-  return Object.values(acc)
-    .map(p => ({...p, net: p.buy - p.sell, avg: p.avgN ? p.avgSum/p.avgN : null}))
-    .sort((a,b) => b.net - a.net);
-}
-
-function sparklineSVG(values, color, w=100, h=32){
-  if(values.length < 2) return "";
-  const min = Math.min(...values), max = Math.max(...values);
-  const range = (max - min) || 1;
-  const pts = values.map((v,i) => {
-    const x = (i/(values.length-1)) * (w-4) + 2;
-    const y = h - 2 - ((v-min)/range) * (h-4);
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(" ");
-  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.75"/></svg>`;
-}
-
-// ============================================================
-// RENDER: BROKER SUMMARY HARI TERAKHIR (BUY vs SELL side-by-side)
-// ============================================================
-function fmtVal(n){
-  const a = Math.abs(n);
-  if (a >= 1e12) return (n/1e12).toFixed(1) + "T";
-  if (a >= 1e9) return (n/1e9).toFixed(1) + "B";
-  if (a >= 1e6) return (n/1e6).toFixed(1) + "M";
-  if (a >= 1e3) return (n/1e3).toFixed(1) + "K";
-  return String(Math.round(n));
-}
-function fmtLot(n){
-  return Math.round(Math.abs(n)).toLocaleString('id-ID');
-}
-
-function fmtDateBersih(d){
-  if (!d) return "-";
-  const s = String(d);
-  // buang bagian jam kalau ada (misal "2026-08-24T00:00:00.000Z")
-  return s.split("T")[0].split(" ")[0];
-}
-
-function renderBrokerSummaryToday(scoped, days){
-  if (!days.length) return "";
-
-  // Bersihkan format tanggal biar konsisten
-  const daysBersih = days.map(d => fmtDateBersih(d));
-  const uniqueDays = [...new Set(daysBersih)].sort();
-
-  // Pakai tanggal yang dipilih user, atau default hari terakhir
-  const selectedDate = state.brokerSummaryDate && uniqueDays.includes(state.brokerSummaryDate)
-    ? state.brokerSummaryDate
-    : uniqueDays[uniqueDays.length - 1];
-
-  const todayRows = scoped.filter(r => fmtDateBersih(r.date) === selectedDate);
-
-  // Agregat per broker per side untuk hari itu
-  const buyMap = {}, sellMap = {};
-  todayRows.forEach(r => {
-    const code = r.broker_code;
-    const lot = Number(r.lot) || 0;
-    const value = Number(r.value) || 0;
-    const isBuy = String(r.side).toUpperCase() === "BUY";
-    const target = isBuy ? buyMap : sellMap;
-    if (!target[code]) target[code] = { code, name: r.broker_name || code, lot: 0, value: 0, avgSum: 0, avgN: 0 };
-    target[code].lot += lot;
-    target[code].value += value;
-    const a = Number(r.avg);
-    if (!isNaN(a) && a > 0) { target[code].avgSum += a; target[code].avgN += 1; }
-  });
-
-  const buyTop = Object.values(buyMap).map(b => ({...b, avg: b.avgN ? b.avgSum/b.avgN : 0})).sort((a,b) => b.value - a.value).slice(0, 10);
-  const sellTop = Object.values(sellMap).map(b => ({...b, avg: b.avgN ? b.avgSum/b.avgN : 0})).sort((a,b) => b.value - a.value).slice(0, 10);
-
-  const rowStyle = "display:grid;grid-template-columns:38px 60px 60px 60px;gap:6px;padding:7px 10px;border-bottom:1px solid var(--border);font-size:11.5px;align-items:center";
-  const headStyle = "display:grid;grid-template-columns:38px 60px 60px 60px;gap:6px;padding:8px 10px;border-bottom:1px solid var(--border);font-size:9.5px;letter-spacing:1px;color:var(--faint);text-transform:uppercase";
-
-  const buyRowsHtml = buyTop.map(b => `
-    <div style="${rowStyle}">
-      <div class="mono" style="font-weight:600;color:var(--pos)">${esc(b.code)}</div>
-      <div class="mono" style="text-align:right;color:var(--text)">${fmtVal(b.value)}</div>
-      <div class="mono" style="text-align:right;color:var(--muted)">${fmtLot(b.lot)}</div>
-      <div class="mono" style="text-align:right;color:var(--muted)">${b.avg ? Math.round(b.avg).toLocaleString('id-ID') : '-'}</div>
-    </div>
-  `).join("");
-
-  const sellRowsHtml = sellTop.map(b => `
-    <div style="${rowStyle}">
-      <div class="mono" style="font-weight:600;color:var(--neg)">${esc(b.code)}</div>
-      <div class="mono" style="text-align:right;color:var(--text)">${fmtVal(b.value)}</div>
-      <div class="mono" style="text-align:right;color:var(--muted)">${fmtLot(b.lot)}</div>
-      <div class="mono" style="text-align:right;color:var(--muted)">${b.avg ? Math.round(b.avg).toLocaleString('id-ID') : '-'}</div>
-    </div>
-  `).join("");
-
-  // Dropdown pemilih tanggal (urut dari terbaru ke terlama)
-  const dateOpts = [...uniqueDays].reverse().map(d =>
-    `<option value="${esc(d)}" ${d===selectedDate?'selected':''}>${esc(d)}</option>`
-  ).join("");
-
-  return `
-    <div style="margin-top:24px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
-        <div class="mono" style="font-size:10.5px;letter-spacing:1.5px;color:var(--faint);text-transform:uppercase">
-          Broker Summary
-        </div>
-        <select onchange="state.brokerSummaryDate=this.value;render()" style="width:auto;min-width:140px;font-size:11.5px;padding:5px 8px">
-          ${dateOpts}
-        </select>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-        <div class="card">
-          <div style="${headStyle}">
-            <div style="color:var(--pos)">Buy</div>
-            <div style="text-align:right">B.Val</div>
-            <div style="text-align:right">B.Lot</div>
-            <div style="text-align:right">B.Avg</div>
-          </div>
-          ${buyRowsHtml || `<div style="padding:14px;text-align:center;color:var(--faint);font-size:11px">Tidak ada data buy</div>`}
-        </div>
-        <div class="card">
-          <div style="${headStyle}">
-            <div style="color:var(--neg)">Sell</div>
-            <div style="text-align:right">S.Val</div>
-            <div style="text-align:right">S.Lot</div>
-            <div style="text-align:right">S.Avg</div>
-          </div>
-          ${sellRowsHtml || `<div style="padding:14px;text-align:center;color:var(--faint);font-size:11px">Tidak ada data sell</div>`}
-        </div>
-      </div>
-    </div>`;
-}
-
-// ============================================================
-// RENDER: VARIAN LEDGER
-// ============================================================
-function renderLedger(scoped, days){
-  // Mode "akumulasi" = semua hari, "agresif" = hari terakhir saja
-  const mode = state.ledgerMode || "akumulasi";
-  let dataRows = scoped;
-  let subLabel = "Akumulasi semua hari";
-
-  if (mode === "agresif" && days.length) {
-    const lastDay = days[days.length - 1];
-    dataRows = scoped.filter(r => fmtDateBersih(r.date) === fmtDateBersih(lastDay));
-    subLabel = `Agresif hari terakhir · ${fmtDateBersih(lastDay)}`;
-  }
-
-  const pos = computePositions(dataRows);
-  // filter: hanya broker yang masih PEGANG barang (net positif), ambil top 7
-  const filtered = pos.filter(p => p.net > 0).sort((a,b) => b.net - a.net).slice(0, 7);
-  const max = Math.max(...filtered.map(p => Math.abs(p.net)), 1);
-
-  const rowsHtml = filtered.map(p => {
-    const c = p.net >= 0 ? "var(--pos)" : "var(--neg)";
-    const tipe = tipeBroker(p.code);
-    return `
-    <div style="border-bottom:1px solid var(--border)">
-      <div style="display:grid;grid-template-columns:44px 1fr 88px 92px 106px;gap:12px;padding:13px 16px 6px;align-items:center">
-        <div class="mono" style="font-size:11.5px;font-weight:600;text-align:center;color:${tipe==='BANDAR'?'var(--gold)':'var(--muted)'};border:1px solid ${tipe==='BANDAR'?'var(--gold)':'var(--border)'};border-radius:2px;padding:3px 0">${esc(p.code)}</div>
-        <div style="font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.name)}${tipe!=='LAIN'?` <span style="font-size:10px;color:var(--faint);margin-left:8px">${tipe}</span>`:''}</div>
-        <div class="mono" style="font-size:12px;color:var(--muted);text-align:right">${lotFmt(p.buy)}</div>
-        <div class="mono" style="font-size:12px;color:var(--muted);text-align:right">${lotFmt(-p.sell)}</div>
-        <div class="mono" style="font-size:15px;font-weight:600;color:${c};text-align:right">${lotFmt(p.net)}</div>
-      </div>
-      <div style="padding:0 16px 12px">
-        <div style="height:3px;background:var(--bg);border-radius:2px">
-          <div style="height:100%;width:${(Math.abs(p.net)/max)*100}%;background:${c};border-radius:2px"></div>
-        </div>
-      </div>
-    </div>`;
-  }).join("");
-
-  return `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
-      <div class="mono" style="font-size:10.5px;letter-spacing:1.5px;color:var(--faint);text-transform:uppercase">
-        Ledger &middot; ${esc(subLabel)}
-      </div>
-      <div style="display:flex;gap:4px">
-        <button class="btn ${mode==='akumulasi'?'btn-gold':''}" style="padding:5px 10px;font-size:11px" onclick="state.ledgerMode='akumulasi';render()">Akumulasi</button>
-        <button class="btn ${mode==='agresif'?'btn-gold':''}" style="padding:5px 10px;font-size:11px" onclick="state.ledgerMode='agresif';render()">Agresif</button>
-      </div>
-    </div>
-    <div class="card">
-      <div class="mono" style="display:grid;grid-template-columns:44px 1fr 88px 92px 106px;gap:12px;padding:11px 16px;border-bottom:1px solid var(--border);font-size:10px;letter-spacing:1px;color:var(--faint);text-transform:uppercase">
-        <div>Kode</div><div>Broker</div><div style="text-align:right">Beli</div><div style="text-align:right">Jual</div><div style="text-align:right">Sisa</div>
-      </div>
-      ${rowsHtml || `<div style="padding:20px;text-align:center;color:var(--faint);font-size:12px">Tidak ada broker net positif untuk ${mode==='agresif'?'hari terakhir':'periode ini'}</div>`}
-    </div>`;
-}
-
-// ============================================================
-// RENDER: VARIAN MATRIKS
-// ============================================================
-function renderMatriks(pos, days){
-  const maxDay = Math.max(...pos.flatMap(p => days.map(d => Math.abs(p.perDay[d]||0))), 1);
-  const header = `<div class="mono" style="display:grid;grid-template-columns:150px repeat(${days.length},1fr) 100px;gap:6px;padding:11px 16px;border-bottom:1px solid var(--border);font-size:10px;letter-spacing:1px;color:var(--faint);text-transform:uppercase">
-    <div>Broker</div>${days.map(d=>`<div style="text-align:center">${esc(d.slice(5))}</div>`).join("")}<div style="text-align:right">Sisa</div>
-  </div>`;
-  const rows = pos.map(p => {
-    const cells = days.map(d => {
-      const v = p.perDay[d] || 0;
-      const intensity = Math.abs(v)/maxDay;
-      const bg = v===0 ? "transparent" : v>0 ? `rgba(63,182,139,${0.12+intensity*0.55})` : `rgba(225,97,90,${0.12+intensity*0.55})`;
-      return `<div class="mono" style="background:${bg};border-radius:2px;padding:7px 3px;text-align:center;font-size:10.5px;color:${intensity>0.45?'var(--text)':'var(--muted)'}">${v===0?'\u00b7':lotFmt(v)}</div>`;
-    }).join("");
-    const c = p.net >= 0 ? "var(--pos)" : "var(--neg)";
-    return `<div style="display:grid;grid-template-columns:150px repeat(${days.length},1fr) 100px;gap:6px;padding:8px 16px;border-bottom:1px solid var(--border);align-items:center">
-      <div style="display:flex;align-items:center;gap:8px;overflow:hidden">
-        <span class="mono" style="font-size:11px;font-weight:600;color:${tipeBroker(p.code)==='BANDAR'?'var(--gold)':'var(--muted)'}">${esc(p.code)}</span>
-        <span style="font-size:11.5px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((p.name||"").split(" ")[0])}</span>
-      </div>
-      ${cells}
-      <div class="mono" style="font-size:13px;font-weight:600;text-align:right;color:${c}">${lotFmt(p.net)}</div>
-    </div>`;
-  }).join("");
-  return `<div class="card" style="overflow-x:auto"><div style="min-width:${Math.max(620,260+days.length*78)}px">${header}${rows}</div></div>`;
-}
-
-// ============================================================
-// RENDER: VARIAN KARTU
-// ============================================================
-function renderKartu(pos, days){
-  const cards = pos.map(p => {
-    const c = p.net >= 0 ? "var(--pos)" : "var(--neg)";
-    let run = 0;
-    const series = days.map(d => (run += (p.perDay[d]||0)));
-    const tipe = tipeBroker(p.code);
-    return `
-    <div class="card" style="border-left:3px solid ${c};padding:15px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
-        <div style="min-width:0">
-          <div class="display" style="font-size:17px;font-weight:700;color:var(--text)">${esc(p.code)}</div>
-          <div style="font-size:11px;color:var(--faint);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.name)}</div>
-        </div>
-        ${tipe!=='LAIN' ? `<div class="badge" style="flex-shrink:0;color:${tipe==='BANDAR'?'var(--gold)':'var(--muted)'}">${tipe}</div>` : ''}
-      </div>
-      <div style="display:flex;align-items:baseline;gap:7px;margin-top:13px">
-        <span class="mono" style="font-size:24px;font-weight:600;color:${c}">${lotFmt(p.net)}</span>
-        <span style="font-size:11px;color:var(--faint)">lot tersisa</span>
-      </div>
-      ${days.length>1 ? `<div style="margin:10px 0 12px">${sparklineSVG(series, c, 230, 34)}</div>` : ''}
-      <div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:${days.length>1?0:12}px;border-top:1px solid var(--border)" class="mono">
-        <span style="font-size:11px;color:var(--muted)"><span style="color:var(--faint)">beli </span>${lotFmt(p.buy)}</span>
-        <span style="font-size:11px;color:var(--muted)"><span style="color:var(--faint)">jual </span>${lotFmt(-p.sell)}</span>
-        ${p.avg ? `<span style="font-size:11px;color:var(--muted)"><span style="color:var(--faint)">avg </span>${Math.round(p.avg)}</span>` : ''}
-      </div>
-    </div>`;
-  }).join("");
-  return `<div class="grid-cards">${cards}</div>`;
-}
-
-// ============================================================
-// MODALS
-// ============================================================
-function openUploadModal(){ state.showUpload = true; render(); }
-function closeUploadModal(){ state.showUpload = false; render(); }
-function openConnectModal(){ state.showConnect = true; render(); }
-function closeConnectModal(){ state.showConnect = false; render(); }
-
-function doImportFromTextarea(){
-  const text = document.getElementById("upload-textarea").value.trim();
-  const errEl = document.getElementById("upload-error");
-  if(!text){ errEl.textContent = "Tempel data CSV dulu."; errEl.style.display = "block"; return; }
-  const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
-  const rows = (parsed.data||[]).filter(r => r.date && r.ticker && r.broker_code && r.side);
-  if(rows.length === 0){
-    errEl.textContent = "Tidak ada baris valid. Butuh kolom: date, ticker, broker_code, side, lot.";
-    errEl.style.display = "block";
-    return;
-  }
-  saveRows(mergeIncoming(rows));
-  closeUploadModal();
-}
-
-async function doTestAndSaveConnection(){
-  const url = document.getElementById("connect-url").value.trim();
-  const token = document.getElementById("connect-token").value.trim();
-  const errEl = document.getElementById("connect-error");
-  const btn = document.getElementById("connect-btn");
-  if(!url || !token){ errEl.textContent = "Isi URL dan token dulu."; errEl.style.display = "block"; return; }
-  btn.textContent = "Menguji..."; btn.disabled = true;
-  try{
-    await testAndSaveConnection(url, token);
-    closeConnectModal();
-    loadKseiData();
-    loadFundamentalData();
-  } catch(e){
-    errEl.textContent = e.message || "Gagal menghubungi URL itu. Cek lagi URL-nya benar dan sudah di-deploy.";
-    errEl.style.display = "block";
-  }
-  btn.textContent = "Uji & Simpan"; btn.disabled = false;
-}
-
-function modalsHtml(){
-  let html = "";
-  if(state.showUpload){
-    html += `
-    <div class="modal-overlay" onclick="closeUploadModal()">
-      <div class="modal-box" onclick="event.stopPropagation()">
-        <div class="modal-head">
-          <div>
-            <div class="display" style="font-size:16.5px;font-weight:600">Masukkan data broker</div>
-            <div style="font-size:12.5px;color:var(--muted);margin-top:3px">Salin isi sheet <span class="mono">broker_positions</span> berikut barisan judulnya</div>
-          </div>
-          <span onclick="closeUploadModal()" style="cursor:pointer;color:var(--muted);font-size:20px;line-height:1">&times;</span>
-        </div>
-        <div class="modal-body">
-          <textarea id="upload-textarea" rows="8" placeholder="date,ticker,broker_code,broker_name,side,lot,value,avg"></textarea>
-          <div style="margin-top:12px">
-            <a href="#" onclick="document.getElementById('upload-textarea').value = SAMPLE; return false;" style="font-size:12.5px;text-decoration:underline">pakai contoh data</a>
-          </div>
-          <div id="upload-error" style="display:none;margin-top:12px;padding:8px 12px;border-radius:3px;background:#331E20;color:var(--neg);font-size:12.5px"></div>
-        </div>
-        <div class="modal-foot">
-          <button class="btn" onclick="closeUploadModal()">Batal</button>
-          <button class="btn btn-gold" onclick="doImportFromTextarea()">Import data</button>
-        </div>
-      </div>
-    </div>`;
-  }
-  if(state.showConnect){
-    const c = state.connection || {};
-    html += `
-    <div class="modal-overlay" onclick="closeConnectModal()">
-      <div class="modal-box" onclick="event.stopPropagation()">
-        <div class="modal-head">
-          <div>
-            <div class="display" style="font-size:16.5px;font-weight:600">Sambungkan otomatis</div>
-            <div style="font-size:12.5px;color:var(--muted);margin-top:3px">Pakai URL Web App dari Apps Script yang sudah kamu deploy</div>
-          </div>
-          <span onclick="closeConnectModal()" style="cursor:pointer;color:var(--muted);font-size:20px;line-height:1">&times;</span>
-        </div>
-        <div class="modal-body">
-          <div style="font-size:11.5px;color:var(--faint);margin-bottom:5px">Web App URL</div>
-          <input id="connect-url" placeholder="https://script.google.com/macros/s/.../exec" value="${esc(c.url||'')}">
-          <div style="font-size:11.5px;color:var(--faint);margin:14px 0 5px">Token rahasia</div>
-          <input id="connect-token" type="password" placeholder="kode rahasia dari SECRET_TOKEN" value="${esc(c.token||'')}">
-          <div id="connect-error" style="display:none;margin-top:12px;padding:8px 12px;border-radius:3px;background:#331E20;color:var(--neg);font-size:12.5px"></div>
-        </div>
-        <div class="modal-foot">
-          <button class="btn" onclick="closeConnectModal()">Batal</button>
-          <button id="connect-btn" class="btn btn-gold" onclick="doTestAndSaveConnection()">Uji & Simpan</button>
-        </div>
-      </div>
-    </div>`;
-  }
-  return html;
-}
-
-// ============================================================
-// MAIN RENDER
-// ============================================================
-function render(){
-  const tickers = Array.from(new Set(state.rows.map(r => r.ticker))).sort();
-  if(!state.ticker && tickers.length) state.ticker = tickers[0];
-  const active = state.ticker;
-  const scoped = state.rows.filter(r => r.ticker === active);
-  const days = Array.from(new Set(scoped.map(r => r.date))).sort();
-  const positions = computePositions(scoped);
-
-  const bandarNet = positions.filter(p => tipeBroker(p.code)==='BANDAR').reduce((a,c)=>a+c.net,0);
-  const ritelNet = positions.filter(p => tipeBroker(p.code)==='RITEL').reduce((a,c)=>a+c.net,0);
-  const arah = bandarNet>0 && ritelNet<0 ? "Ritel \u2192 Bandar" : bandarNet<0 && ritelNet>0 ? "Bandar \u2192 Ritel" : "Belum jelas";
-
-  const root = document.getElementById("root");
-
-  if(state.rows.length === 0){
-    root.innerHTML = `
-    <div class="wrap">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid var(--border)">
-        <img src="logo-header.png" alt="BDM Index" style="width:44px;height:44px;border-radius:8px;flex-shrink:0" />
-        <div>
-          <div class="display" style="font-size:20px;font-weight:700;color:var(--text);line-height:1.1">BDM Index</div>
-          <div class="mono" style="font-size:10px;letter-spacing:1.5px;color:var(--faint);text-transform:uppercase;margin-top:2px">Panel Bacaan Bandar</div>
-        </div>
-      </div>
-      <div class="toolbar-mobile" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:22px">
-        <div>
-          <div class="mono" style="font-size:10.5px;letter-spacing:1.5px;color:var(--faint);text-transform:uppercase;margin-bottom:5px">Posisi barang broker</div>
-          <h1 class="display" style="font-size:27px;font-weight:700;margin:0">Belum ada saham</h1>
-        </div>
-      </div>
-      <div style="border:1px dashed var(--border);border-radius:4px;padding:58px 24px;text-align:center">
-        <div class="display" style="font-size:18px;margin-bottom:8px">Belum ada data broker</div>
-        <div style="font-size:13.5px;color:var(--muted);max-width:460px;margin:0 auto 20px;line-height:1.6">
-          Sambungkan otomatis ke Apps Script, atau tempel manual dari Google Sheets.
-        </div>
-        <div style="display:flex;gap:10px;justify-content:center">
-          <button class="btn btn-gold" onclick="openConnectModal()">Sambungkan otomatis</button>
-          <button class="btn" onclick="openUploadModal()">Tempel manual</button>
-        </div>
-      </div>
-    </div>
-    ${modalsHtml()}`;
-    return;
-  }
-
-  const syncStatusHtml = state.connection ? `
-    <div class="mono" style="display:flex;align-items:center;gap:6px;font-size:11px;color:${state.syncError?'var(--neg)':'var(--faint)'}">
-      <div style="width:6px;height:6px;border-radius:50%;background:${state.syncError?'var(--neg)':'var(--pos)'}"></div>
-      ${state.syncing ? "sinkron..." : state.syncError ? "gagal sinkron" : state.lastSync ? `sinkron ${state.lastSync}` : "tersambung"}
-    </div>
-    <button class="btn" onclick="syncNow()" ${state.syncing?'disabled':''}><span class="${state.syncing?'spin':''}">&#8635;</span></button>
-  ` : "";
-
-  root.innerHTML = `
-  <div class="wrap">
-  <div class="layout">
-
-    <div class="main">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid var(--border)">
-        <img src="logo-header.png" alt="BDM Index" style="width:44px;height:44px;border-radius:8px;flex-shrink:0" />
-        <div>
-          <div class="display" style="font-size:20px;font-weight:700;color:var(--text);line-height:1.1">BDM Index</div>
-          <div class="mono" style="font-size:10px;letter-spacing:1.5px;color:var(--faint);text-transform:uppercase;margin-top:2px">Panel Bacaan Bandar</div>
-        </div>
-      </div>
-      <div class="toolbar-mobile" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:22px">
-        <div>
-          <div class="mono" style="font-size:10.5px;letter-spacing:1.5px;color:var(--faint);text-transform:uppercase;margin-bottom:5px">Posisi barang broker</div>
-          <h1 class="display" style="font-size:27px;font-weight:700;margin:0">${esc(active)}</h1>
-          ${days.length ? `<div style="font-size:12.5px;color:var(--muted);margin-top:4px">Akumulasi ${days.length} hari bursa &middot; ${esc(days[0])} s/d ${esc(days[days.length-1])}</div>` : ''}
-        </div>
-        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          ${syncStatusHtml}
-          <a href="backtest.html" class="btn" style="text-decoration:none">Backtest</a>
-          <a href="https://www.tradingview.com/chart/NmOqIwzz/?symbol=IDX%3A${encodeURIComponent(active || 'BRPT')}"
-             target="_blank" rel="noopener"
-             class="btn" style="text-decoration:none">Chart &#8599;</a>
-          <button class="btn" onclick="openConnectModal()">${state.connection ? "Ubah koneksi" : "Sambungkan otomatis"}</button>
-          <button class="btn" onclick="if(confirm('Hapus semua data tersimpan?')){ saveRows([]); render(); }">Hapus semua</button>
-          <button class="btn btn-gold" onclick="openUploadModal()">Tempel manual</button>
-        </div>
-      </div>
-
-      ${state.syncError ? `<div style="margin-bottom:16px;padding:10px 14px;border-radius:3px;background:#331E20;color:var(--neg);font-size:12.5px">${esc(state.syncError)}</div>` : ""}
-
-      <div class="kartu-ringkasan" style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">
-        <div class="card" style="flex:1 1 200px;border-left:3px solid ${bandarNet>=0?'var(--pos)':'var(--neg)'};padding:14px 16px">
-          <div class="mono" style="font-size:10px;letter-spacing:1px;color:var(--faint);text-transform:uppercase">Barang di tangan bandar</div>
-          <div class="display" style="font-size:25px;font-weight:700;color:${bandarNet>=0?'var(--pos)':'var(--neg)'};margin-top:3px">${lotFmt(bandarNet)} <span style="font-size:12px;font-weight:500;color:var(--faint)">lot</span></div>
-        </div>
-        <div class="card" style="flex:1 1 200px;border-left:3px solid ${ritelNet>=0?'var(--pos)':'var(--neg)'};padding:14px 16px">
-          <div class="mono" style="font-size:10px;letter-spacing:1px;color:var(--faint);text-transform:uppercase">Barang di tangan ritel</div>
-          <div class="display" style="font-size:25px;font-weight:700;color:${ritelNet>=0?'var(--pos)':'var(--neg)'};margin-top:3px">${lotFmt(ritelNet)} <span style="font-size:12px;font-weight:500;color:var(--faint)">lot</span></div>
-        </div>
-        <div class="card" style="flex:1 1 200px;border-left:3px solid var(--gold);padding:14px 16px">
-          <div class="mono" style="font-size:10px;letter-spacing:1px;color:var(--faint);text-transform:uppercase">Arah perpindahan</div>
-          <div class="display" style="font-size:17px;font-weight:600;color:var(--gold);margin-top:6px">${arah}</div>
-        </div>
-      </div>
-
-      <div class="tab">
-        ${tickers.length>1 ? `<select onchange="state.ticker=this.value;render()">${tickers.map(t=>`<option value="${esc(t)}" ${t===active?'selected':''}>${esc(t)}</option>`).join("")}</select>` : ''}
-        <button class="btn ${state.varian==='ledger'?'btn-gold':''}" onclick="state.varian='ledger';render()">Ledger</button>
-        <button class="btn ${state.varian==='matriks'?'btn-gold':''}" onclick="state.varian='matriks';render()">Matriks harian</button>
-        <button class="btn ${state.varian==='kartu'?'btn-gold':''}" onclick="state.varian='kartu';render()">Kartu posisi</button>
-      </div>
-
-      ${state.varian==='ledger' ? renderBrokerSummaryToday(scoped, days) : ''}
-
-      ${state.varian==='ledger' ? `<div style="margin-top:24px"></div>` : ''}
-
-      ${state.varian==='ledger' ? renderLedger(scoped, days) : state.varian==='matriks' ? renderMatriks(positions, days) : renderKartu(positions, days)}
-
-      <div style="margin-top:30px;padding-top:18px;border-top:1px solid var(--border);font-size:11.5px;color:var(--faint);line-height:1.65">
-        Angka sisa barang dihitung dari selisih beli dan jual yang tercatat di data yang kamu masukkan &mdash;
-        bukan posisi sebenarnya broker, karena data sebelum rentang ini tidak diketahui.
-        Bukan rekomendasi finansial.
-      </div>
-    </div>
-
-    <div class="sidebar">
-      ${renderSidCard(active)}
-      ${renderFundamentalCard(active)}
-    </div>
-
-  </div>
-  </div>
-  ${modalsHtml()}`;
-}
-
-// jalankan pertama kali, lalu auto-sync kalau sudah pernah connect
-render();
-if(state.connection){ syncNow(); loadKseiData(); loadFundamentalData(); }
-
-
-
-
-
-// ============================================================
-// PWA: SERVICE WORKER + INSTALL HINT untuk iPhone
-// ============================================================
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
-  });
-}
-
-// Hint install untuk iPhone Safari yang belum-install
-(function tampilkanHintIPhone(){
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-  const isStandalone = ('standalone' in navigator && navigator.standalone) ||
-                       window.matchMedia('(display-mode: standalone)').matches;
-  const sudahDitutup = localStorage.getItem('bdm-pwa-hint-closed') === '1';
-
-  if (!isIOS || isStandalone || sudahDitutup) return;
-
-  window.addEventListener('load', () => {
-    setTimeout(() => {
-      const hint = document.createElement('div');
-      hint.className = 'pwa-hint show';
-      hint.innerHTML = `
-        <span>Install BDM Index: tap <b>Share</b> ↑ lalu pilih <b>Add to Home Screen</b></span>
-        <button class="pwa-hint-close" onclick="this.parentElement.remove(); localStorage.setItem('bdm-pwa-hint-closed','1')">&times;</button>
-      `;
-      document.body.appendChild(hint);
-    }, 2000);
-  });
-})();
-
-</script>
-</body>
-</html>
+    const lots = Number(r.lot)
