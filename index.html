@@ -497,23 +497,32 @@ function renderIdxTable(){
     return;
   }
   tbody.innerHTML = pageData.map(d => {
-    const lfClass = d.LOCAL_FOREIGN === 'L' ? 'idx-lf-L' : d.LOCAL_FOREIGN === 'F' ? 'idx-lf-F' : 'idx-lf-unknown';
-    const pct = d.PERCENTAGE || 0;
-    const pctClass = pct > 10 ? 'idx-pct-high' : pct > 5 ? 'idx-pct-mid' : 'idx-pct-low';
+    // === PERBAIKAN: parse angka ===
+    const shareCode = d.SHARE_CODE || '-';
+    const issuerName = d.ISSUER_NAME || '-';
+    const investorName = d.INVESTOR_NAME || '-';
+    const classification = d.INVESTOR_CLASSIFICATION || '-';
+    const lf = d.LOCAL_FOREIGN || '-';
+    const totalShares = d.TOTAL_HOLDING_SHARES ? Number(d.TOTAL_HOLDING_SHARES) : 0;
+    const percentage = d.PERCENTAGE ? parseFloat(d.PERCENTAGE) : 0;
+
+    const lfClass = lf === 'L' ? 'idx-lf-L' : lf === 'F' ? 'idx-lf-F' : 'idx-lf-unknown';
+    const pctClass = percentage > 10 ? 'idx-pct-high' : percentage > 5 ? 'idx-pct-mid' : 'idx-pct-low';
+
     return `
       <tr>
-        <td style="font-weight:600;">${esc(d.SHARE_CODE || '-')}</td>
-        <td>${esc(d.ISSUER_NAME || '-')}</td>
-        <td style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(d.INVESTOR_NAME || '')}">${esc(d.INVESTOR_NAME || '-')}</td>
-        <td>${esc(d.INVESTOR_CLASSIFICATION || '-')}</td>
-        <td><span class="idx-lf-badge ${lfClass}">${esc(d.LOCAL_FOREIGN || '-')}</span></td>
-        <td style="text-align:right;font-family:monospace;">${d.TOTAL_HOLDING_SHARES ? Number(d.TOTAL_HOLDING_SHARES).toLocaleString('id-ID') : '-'}</td>
-        <td style="text-align:right;font-weight:600;class="${pctClass}">${d.PERCENTAGE ? d.PERCENTAGE.toFixed(2) + '%' : '-'}</td>
+        <td style="font-weight:600;">${esc(shareCode)}</td>
+        <td>${esc(issuerName)}</td>
+        <td style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(investorName)}">${esc(investorName)}</td>
+        <td>${esc(classification)}</td>
+        <td><span class="idx-lf-badge ${lfClass}">${esc(lf)}</span></td>
+        <td style="text-align:right;font-family:monospace;">${totalShares ? totalShares.toLocaleString('id-ID') : '-'}</td>
+        <td style="text-align:right;font-weight:600;class="${pctClass}">${percentage ? percentage.toFixed(2) + '%' : '-'}</td>
       </tr>
     `;
   }).join('');
 }
-
+  
 function updateIdxPagination(){
   const total = state.idxFiltered.length;
   const totalPages = Math.ceil(total / IDX_PAGE_SIZE) || 1;
