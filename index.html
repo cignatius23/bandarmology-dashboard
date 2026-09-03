@@ -150,7 +150,7 @@
   .idx-pagination span { font-size: 14px; color: var(--muted); }
 </style>
 </head>
-<body>
+<body onclick="if(state.bsCalOpen){state.bsCalOpen=false;render()}">
 <div id="root"></div>
 
 <script>
@@ -205,6 +205,13 @@ let state = {
   idxSearch: "",
   idxFilterKode: "",
   idxActive: false, // apakah tab IDX sedang aktif
+  // Kalender Broker Summary
+  bsCalOpen: false,
+  bsCalMode: "single",       // "single" | "range"
+  bsCalStart: null,           // "YYYY-MM-DD"
+  bsCalEnd: null,             // "YYYY-MM-DD" (null jika single)
+  bsCalViewMonth: null,       // {year, month} bulan kiri yang ditampilkan
+  arsipLoading: false,        // sedang load arsip 60d
 };
 
 const IDX_PAGE_SIZE = 50;
@@ -260,6 +267,195 @@ async function testAndSaveConnection(url, token){
   saveRows(mergeIncoming(json.data || []));
   state.lastSync = new Date().toLocaleTimeString("id-ID");
   localStorage.setItem("bdm_lastsync", state.lastSync);
+}
+
+// ============================================================
+// LOAD ARSIP BROKER 60 HARI (dari 6 file BROKER_ARCHIVE)
+// ============================================================
+async function loadArsipBroker60d(ticker){
+  if(!state.connection || !ticker) return;
+  state.arsipLoading = true; render();
+  try{
+    const c = state.connection;
+    const sep = c.url.includes("?") ? "&" : "?";
+    const url = `${c.url}${sep}token=${encodeURIComponent(c.token)}&sheet=broker_archive_60d&ticker=${encodeURIComponent(ticker)}`;
+    const res = await fetch(url);
+    const json = await res.json();
+    if(json.error){
+      console.warn("Arsip 60d gagal:", json.error);
+    } else if(json.data && json.data.length){
+      // merge ke state.rows: hapus dulu row lama untuk ticker ini, lalu masukkan yang baru
+      const bersih = state.rows.filter(r => r.ticker !== ticker);
+      const gabung = mergeIncoming(json.data);
+      // gabung tanpa duplikat dengan yang lain
+      const key = r => `${r.date}__${r.ticker}__${r.broker_code}__${r.side}`;
+      const map = new Map(bersih.map(r => [key(r), r]));
+      json.data.forEach(r => map.set(key(r), r));
+      saveRows(Array.from(map.values()));
+    }
+  } catch(e){
+    console.warn("Arsip 60d error:", e.message);
+  }
+  state.arsipLoading = false;
+  render();
+}
+
+// ============================================================
+// KALENDER BROKER SUMMARY: helper
+// ============================================================
+const NAMA_BULAN = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
+const HARI_PENDEK = ["Min","Sen","Sel","Rab","Kam","Jum","Sab"];
+
+function fmtISODate(d){
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,"0");
+  const dd = String(d.getDate()).padStart(2,"0");
+  return `${y}-${m}-${dd}`;
+}
+function parseISO(s){
+  if(!s) return null;
+  const p = s.split("-");
+  return new Date(Number(p[0]), Number(p[1])-1, Number(p[2]));
+}
+
+function initKalenderJikaKosong(availableDates){
+  if(!state.bsCalStart && availableDates.length){
+    state.bsCalStart = availableDates[availableDates.length-1];
+  }
+  if(!state.bsCalViewMonth){
+    const base = state.bsCalStart ? parseISO(state.bsCalStart) : new Date();
+    state.bsCalViewMonth = { year: base.getFullYear(), month: base.getMonth() };
+  }
+}
+
+function ubahMode(mode){
+  state.bsCalMode = mode;
+  if(mode === "single") state.bsCalEnd = null;
+  render();
+}
+
+function klikTanggalKalender(iso, availableDates){
+  if(!availableDates.includes(iso)) return; // hanya tanggal yang ada datanya
+  if(state.bsCalMode === "single"){
+    state.bsCalStart = iso;
+    state.bsCalEnd = null;
+    state.bsCalOpen = false;
+  } else {
+    // Range mode
+    if(!state.bsCalStart || (state.bsCalStart && state.bsCalEnd)){
+      // mulai range baru
+      state.bsCalStart = iso;
+      state.bsCalEnd = null;
+    } else if(state.bsCalStart && !state.bsCalEnd){
+      // tetapkan end
+      if(iso < state.bsCalStart){
+        state.bsCalEnd = state.bsCalStart;
+        state.bsCalStart = iso;
+      } else {
+        state.bsCalEnd = iso;
+      }
+      state.bsCalOpen = false;
+    }
+  }
+  render();
+}
+
+function geserBulan(delta){
+  let m = state.bsCalViewMonth.month + delta;
+  let y = state.bsCalViewMonth.year;
+  while(m < 0){ m += 12; y -= 1; }
+  while(m > 11){ m -= 12; y += 1; }
+  state.bsCalViewMonth = { year: y, month: m };
+  render();
+}
+
+function renderKalenderPanel(availableDates){
+  const availSet = new Set(availableDates);
+  const start = state.bsCalStart;
+  const end = state.bsCalEnd;
+
+  // 2 bulan: kiri (viewMonth) & kanan (viewMonth+1)
+  const bulan1 = { y: state.bsCalViewMonth.year, m: state.bsCalViewMonth.month };
+  let m2 = bulan1.m + 1, y2 = bulan1.y;
+  if(m2 > 11){ m2 = 0; y2 += 1; }
+  const bulan2 = { y: y2, m: m2 };
+
+  function renderBulan(bln, showLeftArrow, showRightArrow){
+    const firstDay = new Date(bln.y, bln.m, 1);
+    const startDow = firstDay.getDay(); // 0=Min
+    const lastDate = new Date(bln.y, bln.m+1, 0).getDate();
+    let cells = [];
+    for(let i=0; i<startDow; i++) cells.push(null);
+    for(let d=1; d<=lastDate; d++) cells.push(d);
+    while(cells.length % 7 !== 0) cells.push(null);
+
+    let rows = "";
+    for(let i=0; i<cells.length; i+=7){
+      let cols = "";
+      for(let j=0; j<7; j++){
+        const d = cells[i+j];
+        if(d === null){ cols += `<div></div>`; continue; }
+        const iso = fmtISODate(new Date(bln.y, bln.m, d));
+        const isAvail = availSet.has(iso);
+        const isStart = iso === start;
+        const isEnd = iso === end;
+        const inRange = start && end && iso > start && iso < end;
+        let bg = "transparent", color = isAvail ? "var(--text)" : "var(--faint)";
+        let border = "1px solid transparent";
+        if(isStart || isEnd){
+          bg = "var(--gold)"; color = "var(--bg)";
+        } else if(inRange){
+          bg = "rgba(201,162,39,0.20)"; color = "var(--text)";
+        } else if(isAvail){
+          border = "1px solid var(--border)";
+        }
+        const cur = isAvail ? "pointer" : "default";
+        const onClick = isAvail ? `klikTanggalKalender('${iso}', window._bsAvail)` : "";
+        cols += `<div onclick="${onClick}" style="height:30px;display:flex;align-items:center;justify-content:center;font-size:11.5px;background:${bg};color:${color};border:${border};border-radius:3px;cursor:${cur}">${d}</div>`;
+      }
+      rows += `<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:2px">${cols}</div>`;
+    }
+
+    const headerNav = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        ${showLeftArrow ? `<span onclick="geserBulan(-1)" style="cursor:pointer;font-size:14px;color:var(--muted);padding:0 6px">‹</span>` : `<span style="width:18px"></span>`}
+        <div class="mono" style="font-size:11.5px;font-weight:600;color:var(--text)">${NAMA_BULAN[bln.m]} ${bln.y}</div>
+        ${showRightArrow ? `<span onclick="geserBulan(1)" style="cursor:pointer;font-size:14px;color:var(--muted);padding:0 6px">›</span>` : `<span style="width:18px"></span>`}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:4px">
+        ${HARI_PENDEK.map(h => `<div style="text-align:center;font-size:9.5px;color:var(--faint);padding:3px 0">${h}</div>`).join("")}
+      </div>
+    `;
+    return headerNav + rows;
+  }
+
+  // simpan availableDates di window supaya onclick bisa akses
+  window._bsAvail = availableDates;
+
+  return `
+  <div onclick="event.stopPropagation()" style="position:absolute;top:100%;right:0;margin-top:6px;background:var(--panel);border:1px solid var(--borderHi);border-radius:6px;padding:14px;z-index:100;box-shadow:0 6px 20px rgba(0,0,0,0.45);width:min(560px,92vw)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;gap:4px">
+        <button class="btn ${state.bsCalMode==='single'?'btn-gold':''}" style="padding:4px 10px;font-size:11px" onclick="ubahMode('single')">1 Tanggal</button>
+        <button class="btn ${state.bsCalMode==='range'?'btn-gold':''}" style="padding:4px 10px;font-size:11px" onclick="ubahMode('range')">Rentang</button>
+      </div>
+      <span onclick="state.bsCalOpen=false;render()" style="cursor:pointer;color:var(--muted);font-size:18px;line-height:1">&times;</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div>${renderBulan(bulan1, true, false)}</div>
+      <div>${renderBulan(bulan2, false, true)}</div>
+    </div>
+    ${state.bsCalMode==='range' && state.bsCalStart && !state.bsCalEnd ? `<div style="margin-top:8px;font-size:10.5px;color:var(--faint);text-align:center">Pilih tanggal akhir</div>` : ''}
+  </div>
+  `;
+}
+
+function labelTanggalTerpilih(){
+  if(!state.bsCalStart) return "Pilih tanggal";
+  if(state.bsCalMode==='single' || !state.bsCalEnd){
+    return state.bsCalStart;
+  }
+  return `${state.bsCalStart} → ${state.bsCalEnd}`;
 }
 
 // ============================================================
@@ -590,11 +786,29 @@ function renderBrokerSummaryToday(scoped, days){
   if (!days.length) return "";
   const daysBersih = days.map(d => fmtDateBersih(d));
   const uniqueDays = [...new Set(daysBersih)].sort();
-  const selectedDate = state.brokerSummaryDate && uniqueDays.includes(state.brokerSummaryDate)
-    ? state.brokerSummaryDate : uniqueDays[uniqueDays.length - 1];
-  const todayRows = scoped.filter(r => fmtDateBersih(r.date) === selectedDate);
+
+  // Inisialisasi kalender jika belum
+  initKalenderJikaKosong(uniqueDays);
+
+  const start = state.bsCalStart;
+  const end = state.bsCalEnd;
+  const isRange = state.bsCalMode === "range" && start && end;
+
+  // Filter rows berdasarkan tanggal terpilih
+  let rowsFilter;
+  if(isRange){
+    rowsFilter = scoped.filter(r => {
+      const d = fmtDateBersih(r.date);
+      return d >= start && d <= end;
+    });
+  } else {
+    const target = start || uniqueDays[uniqueDays.length-1];
+    rowsFilter = scoped.filter(r => fmtDateBersih(r.date) === target);
+  }
+
+  // Agregat per broker per side
   const buyMap = {}, sellMap = {};
-  todayRows.forEach(r => {
+  rowsFilter.forEach(r => {
     const code = r.broker_code;
     const lot = Number(r.lot) || 0;
     const value = Number(r.value) || 0;
@@ -607,18 +821,28 @@ function renderBrokerSummaryToday(scoped, days){
   });
   const buyTop = Object.values(buyMap).map(b => ({...b, avg: b.avgN ? b.avgSum/b.avgN : 0})).sort((a,b) => b.value - a.value).slice(0, 10);
   const sellTop = Object.values(sellMap).map(b => ({...b, avg: b.avgN ? b.avgSum/b.avgN : 0})).sort((a,b) => b.value - a.value).slice(0, 10);
+
   const rowStyle = "display:grid;grid-template-columns:38px 60px 60px 60px;gap:6px;padding:7px 10px;border-bottom:1px solid var(--border);font-size:11.5px;align-items:center";
   const headStyle = "display:grid;grid-template-columns:38px 60px 60px 60px;gap:6px;padding:8px 10px;border-bottom:1px solid var(--border);font-size:9.5px;letter-spacing:1px;color:var(--faint);text-transform:uppercase";
-  const dateOpts = [...uniqueDays].reverse().map(d => `<option value="${esc(d)}" ${d===selectedDate?'selected':''}>${esc(d)}</option>`).join("");
+
+  const kalenderPanel = state.bsCalOpen ? renderKalenderPanel(uniqueDays) : "";
+  const label = labelTanggalTerpilih();
+  const modeLabel = isRange ? "Agregat rentang" : "1 hari";
+  const loadingBadge = state.arsipLoading ? `<span class="mono" style="font-size:10px;color:var(--gold);margin-left:8px">memuat arsip...</span>` : "";
+
   return `
     <div style="margin-top:24px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
-        <div class="mono" style="font-size:10.5px;letter-spacing:1.5px;color:var(--faint);text-transform:uppercase">Broker Summary</div>
-        <select onchange="state.brokerSummaryDate=this.value;render()" style="width:auto;min-width:140px;font-size:11.5px;padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text)">
-          ${dateOpts}
-        </select>
+        <div class="mono" style="font-size:10.5px;letter-spacing:1.5px;color:var(--faint);text-transform:uppercase">Broker Summary &middot; ${esc(modeLabel)}${loadingBadge}</div>
+        <div style="position:relative">
+          <div onclick="state.bsCalOpen=!state.bsCalOpen;render()" class="mono" style="cursor:pointer;border:1px solid var(--border);border-radius:3px;padding:6px 12px;font-size:11.5px;color:var(--text);background:var(--bg);display:inline-flex;align-items:center;gap:6px">
+            <span>${esc(label)}</span>
+            <span style="color:var(--muted);font-size:10px">${state.bsCalOpen?'▲':'▼'}</span>
+          </div>
+          ${kalenderPanel}
+        </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="broker-summary-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
         <div class="card">
           <div style="${headStyle}"><div style="color:var(--pos)">Buy</div><div style="text-align:right">B.Val</div><div style="text-align:right">B.Lot</div><div style="text-align:right">B.Avg</div></div>
           ${buyTop.length ? buyTop.map(b => `<div style="${rowStyle}"><div class="mono" style="font-weight:600;color:var(--pos)">${esc(b.code)}</div><div class="mono" style="text-align:right;color:var(--text)">${fmtVal(b.value)}</div><div class="mono" style="text-align:right;color:var(--muted)">${fmtLot(b.lot)}</div><div class="mono" style="text-align:right;color:var(--muted)">${b.avg ? Math.round(b.avg).toLocaleString('id-ID') : '-'}</div></div>`).join("") : `<div style="padding:14px;text-align:center;color:var(--faint);font-size:11px">Tidak ada data buy</div>`}
@@ -902,7 +1126,7 @@ function render(){
   // ===== TAB BUTTONS =====
   const tabButtons = `
     <div class="tab">
-      ${tickers.length>1 ? `<select onchange="state.ticker=this.value;render()">${tickers.map(t=>`<option value="${esc(t)}" ${t===active?'selected':''}>${esc(t)}</option>`).join("")}</select>` : ''}
+      ${tickers.length>1 ? `<select onchange="state.ticker=this.value;state.bsCalStart=null;state.bsCalEnd=null;state.bsCalViewMonth=null;render();loadArsipBroker60d(this.value)">${tickers.map(t=>`<option value="${esc(t)}" ${t===active?'selected':''}>${esc(t)}</option>`).join("")}</select>` : ''}
       <button class="btn ${!showIdx && state.varian==='ledger'?'btn-gold':''}" onclick="state.idxActive=false;state.varian='ledger';render()">Ledger</button>
       <button class="btn ${!showIdx && state.varian==='matriks'?'btn-gold':''}" onclick="state.idxActive=false;state.varian='matriks';render()">Matriks harian</button>
       <button class="btn ${!showIdx && state.varian==='kartu'?'btn-gold':''}" onclick="state.idxActive=false;state.varian='kartu';render()">Kartu posisi</button>
@@ -1051,7 +1275,12 @@ function render(){
 
 // jalankan pertama kali
 render();
-if(state.connection){ syncNow(); loadKseiData(); loadFundamentalData(); }
+if(state.connection){
+  syncNow();
+  loadKseiData();
+  loadFundamentalData();
+  if(state.ticker) loadArsipBroker60d(state.ticker);
+}
 if(state.idxActive) loadIdxData();
 
 // ============================================================
